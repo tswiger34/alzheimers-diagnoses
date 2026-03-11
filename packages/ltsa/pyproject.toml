@@ -1,0 +1,37 @@
+[project]
+name = "ltsa"
+version = "0.1.0"
+description = "A generalization of the LTSA model as proposed in Holste, Gregory, et al. 'Harnessing the power of longitudinal medical imaging for eye disease prognosis using Transformer-based sequence modeling.' npj Digital Medicine 7.1 (2024): 216."
+authors = [
+    { name = "Travis Swiger", email = "tswiger34@gmail.com" }
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+]
+readme = "README.md"
+license = "MIT"
+
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.4.2",
+    "opencv-python>=4.13.0.92",
+    "torch>=2.10.0",
+    "torchvision>=0.25.0",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.2.0",
+    "pytest>=9.0.2",
+    "ruff>=0.15.5",
+    "ty>=0.0.21",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.9,<0.10.0"]
+build-backend = "uv_build"
+
+
+[tool.ty.src]
+exclude = ["tests"]
