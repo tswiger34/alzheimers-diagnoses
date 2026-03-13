@@ -6,8 +6,12 @@ readme = "README.md"
 requires-python = ">=3.13"
 
 dependencies = [
+    "ltsa",
     "numpy>=2.4.2",
-    "opencv-python>=4.13.0.92",
+    "patito>=0.8.6",
+    "polars>=1.38.1",
+    "pydantic>=2.12.5",
+    "python-dotenv>=1.2.2",
     "torch>=2.10.0",
     "torchvision>=0.25.0",
 ]
@@ -22,8 +26,11 @@ dev = [
 
 [tool.uv.workspace]
 members = [
-    "packages/ltsa",
+    "packages/*",
 ]
+
+[tool.uv.sources]
+ltsa = { workspace = true }
 
 [tool.ty.src]
 exclude = ["tests"]
