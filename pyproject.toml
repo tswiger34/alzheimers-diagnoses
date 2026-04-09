@@ -6,10 +6,14 @@ readme = "README.md"
 requires-python = ">=3.13"
 
 dependencies = [
+    "altair>=6.0.0",
+    "dbt-core>=1.11.7",
+    "dbt-postgres>=1.10.0",
     "ltsa",
     "numpy>=2.4.2",
     "patito>=0.8.6",
     "polars>=1.38.1",
+    "psycopg2-binary>=2.9.11",
     "pydantic>=2.12.5",
     "python-dotenv>=1.2.2",
     "torch>=2.10.0",
@@ -19,6 +23,8 @@ dependencies = [
 [dependency-groups]
 dev = [
     "ipykernel>=7.2.0",
+    "pandas>=3.0.1",
+    "pyarrow>=23.0.1",
     "pytest>=9.0.2",
     "ruff>=0.15.5",
     "ty>=0.0.21",

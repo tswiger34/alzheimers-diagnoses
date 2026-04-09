@@ -5,10 +5,11 @@ from typing import Literal, Optional, Self
 import patito as pt
 import polars as pl
 
-from mstat_project.utils import clean_str_col_exprs  # noqa
+from mstat_project.data_models._base import BaseFileDataModel
+from mstat_project.utils import clean_str_col_exprs
 
 
-class MRIMetadataRaw(pt.Model):
+class MRIMetadataRaw(BaseFileDataModel):
     image_id: str = pt.Field(dtype=pl.String)
     subject_id: str = pt.Field(dtype=pl.String)
     image_visit: str = pt.Field(dtype=pl.String)
@@ -33,19 +34,6 @@ class MRIMetadataRaw(pt.Model):
     loni_series: str = pt.Field(dtype=pl.String)
     loni_image: str = pt.Field(dtype=pl.String)
 
-    @classmethod
-    def read_file(cls) -> pt.DataFrame[Self]:
-        import os
-
-        from dotenv import load_dotenv
-
-        load_dotenv()
-        data_dir: str = os.getenv(key="DATA_DIR", default="data")
-        file_name: str = os.getenv(key="FILE_NAME_MRI_METADATA", default="")
-
-        df: pl.DataFrame = pl.read_csv(source=f"{data_dir}/files/{file_name}")
-        return pt.DataFrame(data=df).set_model(model=cls)
-
 
 class MRIMetadataCleaned(pt.Model):
     # Primary key
@@ -53,6 +41,13 @@ class MRIMetadataCleaned(pt.Model):
         unique=True,
         derived_from=pl.concat_str(
             exprs=[pl.col(name="subject_id"), pl.col(name="image_date")], separator="|"
+        ).hash(),
+    )
+    subject_viscode_id: str = pt.Field(
+        unique=False,
+        derived_from=pl.concat_str(
+            exprs=[pl.col(name="subject_id"), pl.col(name="image_visit")],
+            separator="|",
         ).hash(),
     )
 
@@ -92,7 +87,8 @@ class MRIMetadataCleaned(pt.Model):
         derived_from=pl.col(name="image_date") == pl.col(name="image_date").max().over(partition_by="subject_id"),
     )
     is_keep: bool = pt.Field(
-        dtype=pl.Boolean, derived_from=pl.col(name="obs_id").cum_count().over(partition_by="obs_id") == 1
+        dtype=pl.Boolean,
+        derived_from=pl.col(name="obs_id").cum_count().over(partition_by="obs_id") == 1,
     )
 
     # Lagged fields
@@ -161,23 +157,28 @@ class MRIMetadataCleaned(pt.Model):
             .derive()
             .filter(predicate=pl.col(name="is_keep"))
         )
+        # prepped_df: pt.DataFrame[Self] = pt.DataFrame(
+        #     data=prepped_df.group_by("subject_viscode_id").first()
+        # ).set_model(model=cls)
 
-        return prepped_df.validate()
+        return prepped_df.cast().derive().validate()
 
     @classmethod
-    def from_file(cls) -> pt.DataFrame[Self]:
+    def from_file(cls, path_prefix: str | None = None) -> pt.DataFrame[Self]:
         """Reads the MRI metadata csv file, then preps, cleans, transforms, and validates the data.
 
         Returns:
             pt.DataFrame[Self]: The validated and cleaned MRI metadata as a data frame
         """
-        raw_df: pt.DataFrame[MRIMetadataRaw] = MRIMetadataRaw.read_file()
+        file_path: str = MRIMetadataRaw.get_file_path(env_var="FILE_NAME_MRI_METADATA", path_prefix=path_prefix)
+        raw_df: pt.DataFrame[MRIMetadataRaw] = MRIMetadataRaw.from_file(file_path=file_path)
 
         return cls.from_raw_df(raw_df=raw_df)
 
 
 if __name__ == "__main__":
-    raw_df = MRIMetadataRaw.read_file()
+    file_path: str = MRIMetadataRaw.get_file_path(env_var="FILE_NAME_MRI_METADATA")
+    raw_df: pt.DataFrame[MRIMetadataRaw] = MRIMetadataRaw.from_file(file_path=file_path)
     clean_df1 = MRIMetadataCleaned.from_file()
     clean_df2 = MRIMetadataCleaned.from_raw_df(raw_df=raw_df)
 

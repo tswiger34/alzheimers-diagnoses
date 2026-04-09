@@ -3,6 +3,8 @@ __pycache__/
 *.py[codz]
 *$py.class
 src/**/original_files
+/**/seeds/*.csv
+
 # C extensions
 *.so
 notebooks/**/*.ipynb

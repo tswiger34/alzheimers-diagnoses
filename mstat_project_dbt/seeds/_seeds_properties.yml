@@ -1,0 +1,418 @@
+seeds:
+  - name: blchange
+    description: Dataset containing the change in diagnosis and clinical evaluations for patients over time
+    column_types:
+      PHASE: string
+      PTID: string
+      RID: integer
+      VISCODE: string
+      VISCODE2: string
+      EXAMDATE: string
+      BCPREDX: string
+      BCADAS: integer
+      BCMMSE: integer
+      BCMMSREC: integer
+      BCNMMMS: integer
+      BCNEUPSY: integer
+      BCNONMEM: integer
+      BCFAQ: integer
+      BCCDR: integer
+      BCDEPRES: integer
+      BCSTROKE: integer
+      BCDELIR: integer
+      BCEXTCIR: integer
+      BCCORADL: integer
+      BCCORCOG: integer
+      ID: integer
+      SITEID: string
+      USERDATE: string
+      USERDATE2: string
+      DD_CRF_VERSION_LABEL: string
+      LANGUAGE_CODE: string
+      HAS_QC_ERROR: integer
+    columns:
+      - name: PHASE
+        description: The ADNI phase during which the data was collected.
+      - name: PTID
+        description: The unique identifier for each participant.
+      - name: RID
+        description: The patient's roster ID
+      - name: VISCODE
+        description: The visit code assigned using the studies coding system
+      - name: VISCODE2
+        description: Translated/normalized visit code
+      - name: EXAMDATE
+        description: The date the form was completed (ADNI1, GO, 3, 4) or the date of the exam (ADNI2)
+      - name: BCPREDX
+        description: Pre-visit Diagnosis (only included in ADNI1 and GO)
+      - name: BCADAS
+        description: Clinically relevant worsening on ADAS (1=Yes, 0=No)
+      - name: BCMMSE
+        description: Clinically relevant worsening on MMSE (1=Yes, 0=No)
+      - name: BCMMSREC
+        description: Clinically relevant worsening on MMSE recall (1=Yes, 0=No)
+      - name: BCNMMMS
+        description: Clinically relevant worsening on non-memory MMSE items (1=Yes, 0=No)
+      - name: BCNEUPSY
+        description: Clinically relevant worsening in memory on neuropsych testing (1=Yes, 0=No)
+      - name: BCNONMEM
+        description: |
+          Clinically relevant impairment/worsening in non-memory cognitive domains on neuropsych testing 
+          (1=Yes, 0=No)
+      - name: BCFAQ
+        description: Clinically relevant worsening in activities of daily living (FAQ) (1=Yes, 0=No)
+      - name: BCCDR
+        description: Clinically relevant deterioration on CDR Sum of Boxes or Overall CDR rating (1=Yes, 0=No)
+      - name: BCDEPRES
+        description: Clinically relevant depression based on clinical judgement or GDS (1=Yes, 0=No)
+      - name: BCSTROKE
+        description: Did subject have a stroke (1=Yes, 0=No)
+      - name: BCDELIR
+        description: |
+          Is there evidence of a delirium (medication effect, toxic or metabolic encephalopathy) (1=Yes, 0=No)
+      - name: BCEXTCIR
+        description: |
+          Has extenuating circumstance (such as a physical health problem, change in residence, 
+          change in support network, death of a family member, etc.) contributed to a change in 
+          the subject's cognitive or functional performance
+      - name: BCCORADL
+        description: |
+          Is the change in clinical status corroborated by informant report of changes in ADL (1=Yes, 0=No)
+      - name: BCCORCOG
+        description: |
+          Is the change in clinical status corroborated by informant report of changes in cognition (1=Yes, 0=No)
+      - name: ID
+        description: Record ID
+      - name: SITEID
+        description: Site ID
+      - name: USERDATE
+        description: string record created
+      - name: USERDATE2
+        description: string record last updated
+      - name: DD_CRF_VERSION_LABEL
+        description: CRF Version Label
+      - name: LANGUAGE_CODE
+        description: Language Code
+      - name: HAS_QC_ERROR
+        description: Indicates whether the record has a Quality Check error (1=Yes, 0=No)
+      - name: update_stamp
+        description: Timestamp of the last update to the record (Not sure which phase this was from)
+  - name: dxsum
+    description: Dataset containing the diagnosis and clinical evaluations for patients at each visit
+    column_types:
+      PHASE: string
+      PTID: string
+      RID: integer
+      VISCODE: string
+      VISCODE2: string
+      EXAMDATE: string
+      DIAGNOSIS: integer
+      DXNORM: integer
+      DXNODEP: integer
+      DXMCI: integer
+      DXMDES: string
+      DXMPTR1: integer
+      DXMPTR2: integer
+      DXMPTR3: integer
+      DXMPTR4: integer
+      DXMPTR5: integer
+      DXMPTR6: integer
+      DXMDUE: integer
+      DXMOTHET: string
+      DXDSEV: integer
+      DXDDUE: integer
+      DXAD: integer
+      DXAPP: integer
+      DXAPROB: string
+      DXAPOSS: string
+      DXPARK: integer
+      DXPDES: integer
+      DXPCOG: integer
+      DXPATYP: integer
+      DXDEP: integer
+      DXOTHDEM: integer
+      DXODES: integer
+      DXCONFID: integer
+      ID: integer
+      SITEID: integer
+      USERDATE: string
+      USERDATE2: string
+      DD_CRF_VERSION_LABEL: string
+      LANGUAGE_CODE: string
+      HAS_QC_ERROR: integer
+      update_stamp: string
+    columns:
+      - name: PHASE
+        description: The ADNI phase during which the data was collected.
+      - name: PTID
+        description: The unique identifier for each participant.
+      - name: RID
+        description: The patient's roster ID
+      - name: VISCODE
+        description: The visit code assigned using the studies coding system
+      - name: VISCODE2
+        description: Translated/normalized visit code
+      - name: EXAMDATE
+        description: The date the form was completed (ADNI1, GO, 3, 4) or the date of the exam (ADNI2)
+      - name: DIAGNOSIS
+        description: |
+          Which best describes the participant's current diagnosis? (1=CN, 2=MCI, 3=Dementia)
+                    
+          - ADNI1: Col name was DXCONV and mapped from the PDXCONV table to DXSUM 
+            (1=Yes - Conversion;2=Yes - Reversion; 0=No)
+          - ADNIGO & ADNI2: 1=Stable: NL to NL; 2=Stable: MCI to MCI; 3=Stable: Dementia to Dementia; 
+            4=Conversion: NL to MCI; 5=Conversion: MCI to Dementia; 6=Conversion: NL to Dementia; 
+            7=Reversion: MCI to NL; 8=Reversion: Dementia to MCI; 9=Reversion: Dementia to NL
+            Mapped from DXCHANGE to DIAGNOSIS ([1,7,9] -> 1,  [2,4,8] -> 2, [3,5,6] ->  3)
+          - ADNI3 & ADNI4: Which best describes the participant's current diagnosis? (1=CN, 2=MCI, 3=Dementia)
+      - name: DXNORM
+        description: Is the participant cognitively normal at this visit? (1=Yes, 0=No)
+      - name: DXNODEP
+        description: Does the participant have mild depression at this visit? (1=Yes, 0=No)
+      - name: DXMCI
+        description: Does the participant have mild cognitive impairment at this visit? (1=Yes, 0=No)
+      - name: DXMDES
+        description: |
+          If Mild Cognitive Impairment, select any that apply (can be separated using `|`)
+          1=MCI (Memory features); 2=MCI (Non-memory features)
+      - name: DXMPTR1
+        description: Is there a subjective memory complaint? (1=Yes, 0=No)
+      - name: DXMPTR2
+        description: Is there an informant report of a memory complaint? (1=Yes, 0=No)
+      - name: DXMPTR3
+        description: Normal general cognitive function? (1=Yes, 0=No)
+      - name: DXMPTR4
+        description: Normal activities of daily living? (1=Yes, 0=No)
+      - name: DXMPTR5
+        description: Objective memory impairment for age and education? (1=Yes, 0=No)
+      - name: DXMPTR6
+        description: Not demented by diagnostic criteria? (1=Yes, 0=No)
+      - name: DXMDUE
+        description: 1 if MCI (1=Yes, 0=No)
+      - name: DXMOTHET
+        description: |
+          If MCI due to other etiology, select box(es) to indicate reason (can be separated using `|`)
+          1=Fronto-temporal Dementia; 2=Parkinson's Disease; 3=Huntington's Disease; 
+          4=Progressive Supranuclear Palsy; 8=Corticobasal Degeneration; 
+          9=Vascular Dementia; 10=Prion-Associated Dementia; 14=Other (specify)
+      - name: DXDSEV
+        description: Dementia Severity - Clinician's Impression (1=Mild; 2=Moderate; 3=Severe)
+      - name: DXDDUE
+        description: |
+          Suspected cause of dementia (1=Dementia due to Alzheimer's Disease, 2=Dementia due to other etiology)
+      - name: DXAD
+        description: 1 if Alzheimer's Disease (1=Yes, 0=No)
+      - name: DXAPP
+        description: If Alzheimer's Disease, 1=Probable; 2=Possible
+      - name: DXAPROB
+        description: |
+          If Probable AD, select box(es) for other symptoms present 1=None;2=Stroke(s);
+          3=Depression;4=Delirium;5=Parkinsonism;6=Metabolic/Toxic Disorder (specify);
+          7=Other (specify)
+      - name: DXAPOSS
+        description: |
+          If Possible AD, select box(es) to indicate reason (can be separated using `|`)
+          1=Atypical clinical course or features (specify); 2=Stroke(s); 3=Depression;
+          4=Delirium; 5=Parkinsonism; 6=Metabolic / Toxic Disorder (specify);
+          7=Other (specify)
+      - name: DXPARK
+        description: 1 if Parkinson's Disease (1=Yes, 0=No)
+      - name: DXPDES
+        description: |
+          If Parkinsonism, select box which indicates best diagnosis
+          1=Parkinsonism without cognitive impairment; 2=Parkinsonism with cognitive impairment, not demented;
+          3=Parkinsonism with cognitive impairment, demented; 4=Atypical Parkinsonism
+      - name: DXPCOG
+        description: |
+          If Parkinsonism with cognitive impairment, demented (1=PD;2=PDD;3=DLB;4=PDAD)
+      - name: DXPATYP
+        description: |
+          If Atypical Parkinsonism 1=PSP;2=CBGD;3=OPCA;4=SND;5=Shy Drager;6=Vascular;7=Other (specify)
+      - name: DXDEP
+        description: Depressive symptoms present (1=Yes, 0=No)
+      - name: DXOTHDEM
+        description: Other Dementia (not Alzheimer's Disease) (1=Yes, 0=No)
+      - name: DXODES
+        description: |
+          If Other Dementia, select box which indicates best diagnosis
+          1=Frontal; 3=Huntington's Disease; 5=Alcohol-related Dementia; 6=NPH; 
+          7=Major Depression; 9=Vascular Dementia; 10=Prion-Associated Dementia;
+          11=HIV; 12=Primary Progressive Aphasia; 13=Posterior Cortical Dysfunction;
+          14=Other (specify)
+      - name: DXCONFID
+        description: |
+          Clinician's confidence in diagnosis
+          (1=Uncertain; 2=Mildly Confident; 3=Moderately Confident; 4=Highly Confident)
+      - name: ID
+        description: Record ID
+      - name: SITEID
+        description: Site ID
+      - name: USERDATE
+        description: string record created
+      - name: USERDATE2
+        description: string record last updated
+      - name: DD_CRF_VERSION_LABEL
+        description: CRF Version Label
+      - name: LANGUAGE_CODE
+        description: Language Code
+      - name: HAS_QC_ERROR
+        description: Indicates whether the record has a Quality Check error (1=Yes, 0=No)
+      - name: update_stamp
+        description: Timestamp of the last update to the record (Not sure which phase this was from)
+
+  - name: image_manifest
+    description: Metadata about the images downloaded from LONI
+    column_types:
+      image_id: string
+      subject_id: string
+      study_id: string
+      series_id: string
+      image_visit: string
+      image_date: string
+      image_description: string
+    columns:
+      - name: image_id
+        description: The unique identifier for each image in the dataset
+      - name: subject_id
+        description: The unique identifier for each participant in the dataset
+      - name: study_id
+        description: The ADNI study from which the image was collected (ADNI1, GO, 2, 3, 4)
+      - name: series_id
+        description: The series ID for the image (e.g. MPRAGE)
+      - name: image_visit
+        description: The visit code assigned using the studies coding system
+      - name: image_date
+        description: The date the image was collected
+      - name: image_description
+        description: Description of the image provided by LONI
+  - name: key_mri
+    description: Key MRI metadata for each scan collected in ADNI
+    column_types:
+      image_id: string
+      subject_id: string
+      image_visit: string
+      image_date: string
+      series_type: string
+      mri_protocol_phase: string
+      series_description: string
+      acceleration: string
+      acquisition_type: string
+      acquisition_plane: string
+      number_volumes: string
+      slices_per_volume: string
+      slice_thickness: string
+      scanner_manufacturer: string
+      scanner_model: string
+      software_version: string
+      magnetic_field_strength: string
+      receive_coil_name: string
+      study_instance_uid: string
+      series_instance_uid: string
+      loni_study: string
+      loni_series: string
+      loni_image: string
+    columns:
+      - name: image_id
+        description: The unique identifier for each LONI image in the dataset
+      - name: subject_id
+        description: The unique identifier for each participant in the dataset
+      - name: image_visit
+        description: The visit code assigned using the studies coding system, not normalized
+      - name: image_date
+        description: The date the image was collected
+      - name: series_type
+        description: The type of MRI series, all T1w in this dataset
+      - name: mri_protocol_phase
+        description: The ADNI phase during which the MRI was collected (e.g. ADNI1, GO, 2, 3, 4)
+      - name: series_description
+        description: Description of the MRI series type (e.g. MPRAGE)
+      - name: acceleration
+        description: Whether the MRI was collected with acceleration, either Unaccelerated, Accelerated, or Ultrafast
+      - name: acquisition_type
+        description: The type of acquisition, all are 3D
+      - name: acquisition_plane
+        description: The plane in which the MRI was acquired, all are Sagittal
+      - name: number_volumes
+        description: The number of volumes collected in the MRI, < 1% are 2, rest are 1
+      - name: slices_per_volume
+        description: The number of slices collected in the MRI, ranges from 39 to 256
+      - name: slice_thickness
+        description: |
+          The thickness of the slices collected in the MRI, ranges from falls into either 1.0-1.02 mm
+          or 1.18-1.20 mm
+      - name: scanner_manufacturer
+        description: The manufacturer of the MRI scanner used to collect the image
+      - name: scanner_model
+        description: The model of the MRI scanner used to collect the image
+      - name: software_version
+        description: The software name and version of the MRI scanner used to collect the image
+      - name: magnetic_field_strength
+        description: The magnetic field strength of the MRI scanner used to collect the image, either 1.5T or 3T
+      - name: receive_coil_name
+        description: The name of the receive coil used to collect the MRI
+      - name: study_instance_uid
+        description: The unique identifier for the MRI study instance
+      - name: series_instance_uid
+        description: The unique identifier for the MRI series instance
+      - name: loni_study
+        description: The ADNI study from which the MRI was collected
+      - name: loni_series
+        description: The LONI series ID for the MRI
+      - name: loni_image
+        description: The LONI image ID for the MRI (same as image_id)
+  - name: ptdemog
+    description: Dataset containing demographic information for each participant in ADNI
+    # column_types: PHASE
+    #   PTID
+    #   RID
+    #   VISCODE
+    #   VISCODE2
+    #   VISDATE
+    #   PTSOURCE
+    #   PTGENDER
+    #   PTDOB
+    #   PTDOBYY
+    #   PTMARRY
+    #   PTEDUCAT
+    #   PTWORKHS
+    #   PTWORK
+    #   PTNOTRT
+    #   PTRTYR
+    #   PTHOME
+    #   PTETHCATH
+    #   PTASIAN
+    #   PTOPI
+    #   PTBORN
+    #   PTIMMAGE
+    #   PTIMMWHY
+    #   PTBIRPR
+    #   PTBIRGR
+    #   ID
+    #   SITEID
+    #   USERDATE
+    #   USERDATE2
+    #   DD_CRF_VERSION_LABEL
+    #   LANGUAGE_CODE
+    #   HAS_QC_ERROR
+    #   update_stamp
+    # columns:
+    #   - name: PTID
+    #     description: The unique identifier for each participant in the dataset
+    #   - name: RID
+    #     description: The patient's roster ID
+    #   - name: SITEID
+    #     description: The site at which the participant was enrolled in ADNI
+    #   - name: USERDATE
+    #     description: string record created
+    #   - name: USERDATE2
+    #     description: string record last updated
+    #   - name: DD_CRF_VERSION_LABEL
+    #     description: CRF Version Label
+    #   - name: LANGUAGE_CODE
+    #     description: Language Code
+    #   - name: HAS_QC_ERROR
+    #     description: Indicates whether the record has a Quality Check error (1=Yes, 0=No)
+    #   - name: ID
+    #     description: Record ID
+    #   - name: update_stamp
+    #     description: Timestamp of the last update to the record (Not sure which phase this was from)

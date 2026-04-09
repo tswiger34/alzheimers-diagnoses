@@ -1,0 +1,321 @@
+version: 2
+
+models:
+  - name: stg_blchange
+    description: Staging model for the baseline change dataset from ADNI.
+    data_tests:
+      - unique:
+        arguments:
+          column_name: "(ptid || '-' || exam_date::TEXT)"
+    columns:
+      - name: blchange_exam_id
+        data_type: TEXT
+        description: |
+          A unique identifier for each exam, created by concatenating the patient ID and the normalized visit code
+        data_tests:
+          - not_null
+          - unique
+      - name: study_phase
+        data_type: TEXT
+        description: The phase of the ADNI study during which the data was collected
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ["ADNI1", "ADNI2", "ADNI3", "ADNI4", "ADNIGO"]
+      - name: ptid
+        data_type: TEXT
+        description: The patient ID
+        data_tests:
+          - not_null
+      - name: visit_code_normed
+        data_type: TEXT
+        description: The normalized visit code, with baseline visits standardized to 'BL'
+        data_tests:
+          - not_null
+      - name: exam_date
+        data_type: DATE
+        description: The date of the exam
+        data_tests:
+          - not_null
+      - name: pre_visit_diagnosis
+        data_type: INTEGER
+        description: The diagnosis of the patient prior to the visit (1=CN, 2=MCI, 3=AD)
+        data_tests:
+          - accepted_values:
+              values: [1, 2, 3]
+      - name: ad_worsening
+        data_type: BOOL
+        description: Indicator of whether there was worsening in AD diagnosis compared to the previous visit
+      - name: mmse_worsening
+        data_type: BOOL
+        description: Indicator of whether there was worsening in MMSE score compared to the previous visit
+      - name: mmse_recall_worsening
+        data_type: BOOL
+        description: Indicator of whether there was worsening in MMSE recall score compared to the previous visit
+      - name: non_memory_mmse_worsening
+        data_type: BOOL
+        description: |
+          Indicator of whether there was worsening in MMSE non-memory score compared to the previous visit
+      - name: neuropsych_memory_worsening
+        data_type: BOOL
+        description: |
+          Indicator of whether there was worsening in memory neuropsychological tests compared to the
+          previous visit
+      - name: neuropsych_non_memory_worsening
+        data_type: BOOL
+        description: |
+          Indicator of whether there was worsening in non-memory neuropsychological tests compared to the
+          previous visit
+      - name: adl_worsening
+        data_type: BOOL
+        description: Indicator of whether there was clinically relevant worsening in activities of daily living
+      - name: cdr_worsening
+        data_type: BOOL
+        description: Indicator of whether there was worsening in CDR global score compared to the previous visit
+      - name: depression_worsening
+        data_type: BOOL
+        description: |
+          Indicator of whether there was worsening in depression symptoms compared to the previous visit
+      - name: stroke
+        data_type: BOOL
+        description: Indicator of whether the patient had a stroke between the previous visit and the current visit
+      - name: delirium
+        data_type: BOOL
+        description: Indicator for if there is evidence of a delirium
+      - name: extenuating_circumstance
+        data_type: BOOL
+        description: |
+          Has extenuating circumstance (such as a physical health problem, change in residence, 
+          change in support network, death of a family member, etc.) contributed to a change in 
+          the subject's cognitive or functional performance
+      - name: corroborated_adl
+        data_type: BOOL
+        description: Indicator of whether the ADL worsening is corroborated
+      - name: corroborated_cognition
+        data_type: BOOL
+        description: Indicator of whether the cognitive worsening is corroborated
+      - name: record_created
+        data_type: TIMESTAMP
+        description: The timestamp when the record was created
+      - name: record_last_updated
+        data_type: TIMESTAMP
+        description: The timestamp when the record was last updated
+      - name: crf_version_label
+        data_type: TEXT
+        description: The version label of the CRF
+      - name: has_qc_error
+        data_type: BOOL
+        description: Indicator of whether the record has a QC error
+        data_tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "IF has_qc_error IS NOT NULL THEN has_qc_error = FALSE ELSE TRUE END"
+      - name: update_stamp
+        data_type: TIMESTAMP
+        description: The timestamp of the last update
+
+  - name: stg_dxsum
+    description: Staging model for the diagnosis summary dataset from ADNI.
+    data_tests:
+      - unique:
+        arguments:
+          column_name: "(ptid || '-' || exam_date::TEXT)"
+    columns:
+      - name: dxsum_exam_id
+        data_type: TEXT
+        description: A unique identifier for each exam, created by concatenating the patient ID and the normalized visit code
+        data_tests:
+          - not_null
+          - unique
+      - name: study_phase
+        data_type: TEXT
+        description: The phase of the ADNI study during which the data was collected
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ["ADNI1", "ADNI2", "ADNI3", "ADNI4", "ADNIGO"]
+      - name: ptid
+        data_type: TEXT
+        description: The patient ID
+        data_tests:
+          - not_null
+      - name: visit_code_normed
+        data_type: TEXT
+        description: The normalized visit code, which standardizes various formats for baseline visits (e.g., 'BL', 'SC', 'INIT', '4_BL', '4_INIT', '4_SC')
+        data_tests:
+          - not_null
+      - name: exam_date
+        data_type: DATE
+        description: The date of the exam
+        data_tests:
+          - not_null
+      - name: current_diagnosis
+        data_type: INTEGER
+        description: The current diagnosis of the patient at the time of the exam (1=CN, 2=MCI, 3=AD)
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3]
+      - name: is_cognitively_normal
+        data_type: BOOL
+        description: Indicator of whether the patient is cognitively normal at the time of the exam
+      - name: has_mild_depression
+        data_type: BOOL
+        description: Indicator of whether the patient has mild depression at the time of the exam
+      - name: has_mild_cognitive_impairment
+        data_type: BOOL
+        description: Indicator of whether the patient has mild cognitive impairment at the time of the exam
+      - name: mci_subtype_codes
+        data_type: TEXT
+        description: The subtypes of mild cognitive impairment that apply to the patient at the time of the exam, concatenated into a single string
+      - name: mci_has_memory_features
+        data_type: BOOL
+        description: Indicator of whether the patient has memory features of mild cognitive impairment at the time of the exam
+      - name: mci_has_non_memory_features
+        data_type: BOOL
+        description: Indicator of whether the patient has non-memory features of mild cognitive impairment at the time of the exam
+      - name: has_subjective_memory_complaint
+        data_type: BOOL
+        description: Indicator of whether the patient has a subjective memory complaint at the time of the exam
+      - name: has_informant_reported_memory_complaint
+        data_type: BOOL
+        description: Indicator of whether there is an informant-reported memory complaint for the patient at the time of the exam
+      - name: has_normal_general_cognitive_function
+        data_type: BOOL
+        description: Indicator of whether the patient has normal general cognitive function at the time of the exam
+      - name: has_normal_activities_of_daily_living
+        data_type: BOOL
+        description: Indicator of whether the patient has normal activities of daily living at the time of the exam
+      - name: has_objective_memory_impairment
+        data_type: BOOL
+        description: Indicator of whether the patient has objective memory impairment at the time of the exam
+      - name: is_not_demented_by_diagnostic_criteria
+        data_type: BOOL
+        description: Indicator of whether the patient is not demented by diagnostic criteria at the time of the exam
+      - name: is_mci_due_to_alzheimers_disease
+        data_type: BOOL
+        description: Indicator of whether the patient's mild cognitive impairment is due to Alzheimer's disease
+      - name: mci_other_etiology_codes
+        data_type: TEXT
+        description: The codes representing other etiologies of mild cognitive impairment
+      - name: dementia_severity
+        data_type: INTEGER
+        description: The severity of dementia at the time of the exam (0=none, 1=questionable, 2=mild, 3=moderate, 4=severe)
+        data_tests:
+          - accepted_values:
+              values: [1, 2, 3]
+      - name: dementia_suspected_cause
+        data_type: INTEGER
+        description: |
+          The suspected cause of dementia at the time of the exam 
+          (1=Dementia due to Alzheimer's Disease, 2=Dementia due to other etiology)
+        data_tests:
+          - accepted_values:
+              values: [1, 2]
+      - name: has_alzheimers_disease
+        data_type: BOOL
+        description: Indicator of whether the patient has Alzheimer's disease at the time of the exam
+      - name: alzheimers_disease_presentation
+        data_type: INTEGER
+        description: If Alzheimer's Disease, 1=Probable; 2=Possible
+        data_tests:
+          - accepted_values:
+              values: [1, 2]
+      - name: probable_alzheimers_symptom_codes
+        data_type: TEXT
+        description: |
+          If Probable AD, select box(es) for other symptoms present 1=None;2=Stroke(s);
+          3=Depression;4=Delirium;5=Parkinsonism;6=Metabolic/Toxic Disorder (specify);
+          7=Other (specify)
+
+      - name: possible_alzheimers_reason_codes
+        data_type: TEXT
+        description: |
+          If Possible AD, select box(es) to indicate reason (can be separated using `|`)
+          1=Atypical clinical course or features (specify); 2=Stroke(s); 3=Depression;
+          4=Delirium; 5=Parkinsonism; 6=Metabolic / Toxic Disorder (specify);
+          7=Other (specify)
+      - name: has_parkinsons_disease
+        data_type: BOOL
+        description: Indicator of whether the patient has Parkinson's disease at the time of the exam
+      - name: has_depressive_symptoms
+        data_type: BOOL
+        description: Indicator of whether the patient has depressive symptoms at the time of the exam
+      - name: has_other_dementia
+        data_type: BOOL
+        description: Indicator of whether the patient has a dementia other than Alzheimer's disease at the time of the exam
+      - name: other_dementia_diagnosis
+        data_type: INTEGER
+        description: |
+          If Other Dementia, select box which indicates best diagnosis
+          1=Frontal; 3=Huntington's Disease; 5=Alcohol-related Dementia; 6=NPH; 
+          7=Major Depression; 9=Vascular Dementia; 10=Prion-Associated Dementia;
+          11=HIV; 12=Primary Progressive Aphasia; 13=Posterior Cortical Dysfunction;
+          14=Other (specify)
+        data_tests:
+          - accepted_values:
+              values: [1, 3, 5, 6, 7, 9, 10, 11, 12, 13, 14]
+      - name: diagnosis_confidence
+        data_type: INTEGER
+        description: |
+          Clinician's confidence in diagnosis
+          (1=Uncertain; 2=Mildly Confident; 3=Moderately Confident; 4=Highly Confident)
+        data_tests:
+          - accepted_values:
+              values: [1, 2, 3, 4]
+      - name: record_created
+        data_type: TIMESTAMP
+        description: The timestamp when the record was created
+      - name: record_last_updated
+        data_type: TIMESTAMP
+        description: The timestamp when the record was last updated
+      - name: crf_version_label
+        data_type: TEXT
+        description: The version label of the CRF
+      - name: has_qc_error
+        data_type: BOOL
+        description: Indicator of whether the record has a QC error
+        data_tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "IF has_qc_error IS NOT NULL THEN has_qc_error = FALSE ELSE TRUE END"
+      - name: update_stamp
+        data_type: TIMESTAMP
+        description: The timestamp of the last update
+
+  - name: stg_image_manifest
+    description: Staging model for the manifest of the downloaded images from ADNI.
+    columns:
+      - name: image_id
+        data_type: TEXT
+        description: The unique identifier for each image in the ADNI image manifest
+        data_tests:
+          - not_null
+          - unique
+      - name: ptid
+        data_type: TEXT
+        description: The patient ID associated with the image
+        data_tests:
+          - not_null
+      - name: study_id
+        data_type: INTEGER
+        description: The LONI study ID associated with the image
+        data_tests:
+          - not_null
+      - name: visit_code_normed
+        data_type: TEXT
+        description: |
+          The normalized visit code associated with the image, which standardizes various 
+          formats for baseline visits (e.g., 'BL', 'SC', 'INIT', '4_BL', '4_INIT', '4_SC')
+        data_tests:
+          - not_null
+      - name: image_date
+        data_type: DATE
+        description: The date the image was taken
+        data_tests:
+          - not_null
+      - name: image_description
+        data_type: TEXT
+        description: The type of MRI image (e.g., "MP-RAGE", "SPGR", etc.)
+        data_tests:
+          - not_null
