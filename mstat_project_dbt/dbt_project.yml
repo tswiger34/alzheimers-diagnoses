@@ -21,3 +21,4 @@ models:
   mstat_project:
     stg:
       +materialized: view
+      +schema: stg

@@ -33,6 +33,7 @@ new_viscodes AS (
         *,
         COALESCE(visit_code_2, visit_code_1) AS visit_code_final
     FROM casted
+    WHERE exam_date IS NOT NULL AND ptid IS NOT NULL
 ),
 
 normed AS (

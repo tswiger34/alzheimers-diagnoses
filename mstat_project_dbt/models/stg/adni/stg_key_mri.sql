@@ -31,6 +31,24 @@ normed AS (
         *,
         {{ norm_viscodes('visit_code') }} AS visit_code_normed
     FROM casted
+),
+
+get_flags AS (
+    SELECT
+        *,
+        CASE 
+            WHEN series_description LIKE '%MP%RAGE%' THEN 1
+        ELSE 0
+        END AS is_mprage,
+        CASE 
+            WHEN series_description LIKE '%MP%RAGE%REPEAT%' THEN 1
+        ELSE 0
+        END AS is_mprage_repeat,
+        CASE
+            WHEN series_description LIKE '%REPEAT%' THEN 1
+        ELSE 0
+        END AS is_repeat
+    FROM normed        
 )
 
 SELECT
@@ -56,5 +74,8 @@ SELECT
     series_instance_uid,
     loni_study_id,
     loni_series_id,
-    loni_image_id
-FROM normed
+    loni_image_id,
+    is_mprage,
+    is_mprage_repeat,
+    is_repeat
+FROM get_flags

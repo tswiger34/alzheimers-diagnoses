@@ -1,0 +1,15 @@
+version: 2
+
+models:
+  - name: core_image_set
+    description: |
+      The final set of images that will be used for analysis. The resulting data set will have represent 1 image,
+      and be unique at the patient-visit code leve. 
+
+      Images were selected based on the following criteria:
+
+        1. Must have no QC errors
+        2. Must be in both the image manifest and key_mri datasets
+        3. Image ID, patient ID, and visit code cannot be null
+        4. If multiple images are available for a patient-visit code, then the following criteria are applied:
+          a. *Post Processing*: All post processing > MP-RAGE > No post processing

@@ -42,6 +42,7 @@ new_viscodes AS (
         *,
         COALESCE(visit_code_2, visit_code_1) AS visit_code_final
     FROM casted
+    WHERE exam_date IS NOT NULL AND ptid IS NOT NULL
 ),
 
 normed AS (
@@ -54,20 +55,22 @@ normed AS (
 mci_codes AS (
     SELECT
         *,
-    CASE
-        WHEN mci_subtype_codes IS NULL THEN NULL
-        WHEN mci_subtype_codes = LIKE '%1%' THEN TRUE
-        ELSE FALSE
-    END AS mci_has_memory_features,
-    CASE
-        WHEN mci_subtype_codes IS NULL THEN NULL
-        WHEN mci_subtype_codes = LIKE '%2%' THEN TRUE
-        ELSE FALSE
-    END AS mci_has_non_memory_features,
+        ptid || '|' || visit_code_normed AS dxsum_exam_id,
+        CASE
+            WHEN mci_subtype_codes IS NULL THEN NULL
+            WHEN mci_subtype_codes LIKE '%1%' THEN TRUE
+            ELSE FALSE
+        END AS mci_has_memory_features,
+        CASE
+            WHEN mci_subtype_codes IS NULL THEN NULL
+            WHEN mci_subtype_codes LIKE '%2%' THEN TRUE
+            ELSE FALSE
+        END AS mci_has_non_memory_features
+        FROM normed
 )
 
 SELECT
-    ptid || '|' || visit_code_normed AS dxsum_exam_id,
+    dxsum_exam_id,
     study_phase,
     ptid,
     visit_code_normed,
@@ -103,4 +106,4 @@ SELECT
     crf_version_label,
     has_qc_error,
     update_stamp
-FROM normed
+FROM mci_codes
