@@ -7,15 +7,19 @@ requires-python = ">=3.13"
 
 dependencies = [
     "altair>=6.0.0",
+    "dash>=4.1.0",
     "dbt-core>=1.11.7",
     "dbt-postgres>=1.10.0",
     "ltsa",
+    "matplotlib>=3.10.9",
     "numpy>=2.4.2",
     "patito>=0.8.6",
+    "plotly>=6.7.0",
     "polars>=1.38.1",
     "psycopg2-binary>=2.9.11",
     "pydantic>=2.12.5",
     "python-dotenv>=1.2.2",
+    "sqlalchemy>=2.0.49",
     "torch>=2.10.0",
     "torchvision>=0.25.0",
 ]

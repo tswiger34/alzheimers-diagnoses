@@ -1,5 +1,6 @@
 {
     "recommendations": [
+        "openai.chatgpt",
         "charliermarsh.ruff",
         "DavidAnson.vscode-markdownlint",
         "esbenp.prettier-vscode",

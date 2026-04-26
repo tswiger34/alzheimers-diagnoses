@@ -22,3 +22,6 @@ models:
     stg:
       +materialized: view
       +schema: stg
+    core:
+      +materialized: table
+      +schema: core

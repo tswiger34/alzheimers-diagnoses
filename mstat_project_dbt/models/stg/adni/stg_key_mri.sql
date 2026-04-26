@@ -1,3 +1,4 @@
+
 WITH casted AS (
     SELECT
         {{ norm_text_codes('"image_id"') }}::INTEGER AS image_id,
@@ -16,7 +17,7 @@ WITH casted AS (
         {{ norm_text_codes('"scanner_manufacturer"', to_upper=true) }}::TEXT AS scanner_manufacturer,
         {{ norm_text_codes('"scanner_model"', to_upper=true) }}::TEXT AS scanner_model,
         {{ norm_text_codes('"software_version"', to_upper=true) }}::TEXT AS software_version,
-        {{ norm_text_codes('"magnetic_field_strength"') }}::NUMERIC AS magnetic_field_strength_tesla,
+        {{ norm_text_codes('"magnetic_field_strength"') }}::TEXT AS magnetic_field_strength_tesla,
         {{ norm_text_codes('"receive_coil_name"', to_upper=true) }}::TEXT AS receive_coil_name,
         {{ norm_text_codes('"study_instance_uid"', to_upper=true) }}::TEXT AS study_instance_uid,
         {{ norm_text_codes('"series_instance_uid"', to_upper=true) }}::TEXT AS series_instance_uid,
@@ -47,7 +48,12 @@ get_flags AS (
         CASE
             WHEN series_description LIKE '%REPEAT%' THEN 1
         ELSE 0
-        END AS is_repeat
+        END AS is_repeat,
+        CASE
+            WHEN acceleration LIKE '%UNACCELERATED%' THEN 0
+            WHEN acceleration IS NULL THEN NULL
+            ELSE 1
+        END AS is_accelerated
     FROM normed        
 )
 
@@ -75,7 +81,8 @@ SELECT
     loni_study_id,
     loni_series_id,
     loni_image_id,
-    is_mprage,
-    is_mprage_repeat,
-    is_repeat
+    is_mprage::BOOL,
+    is_mprage_repeat::BOOL,
+    is_repeat::BOOL,
+    is_accelerated::BOOL
 FROM get_flags

@@ -13,3 +13,45 @@ models:
         3. Image ID, patient ID, and visit code cannot be null
         4. If multiple images are available for a patient-visit code, then the following criteria are applied:
           a. *Post Processing*: All post processing > MP-RAGE > No post processing
+    config:
+      indexes:
+        - type: btree
+          unique: true
+          columns: [image_id]
+        - type: btree
+          unique: true
+          columns: [ptid, visit_code_normed]
+    columns:
+      - name: image_id
+        data_type: TEXT
+        description: The unique identifier for each image in the ADNI image manifest
+        data_tests:
+          - not_null
+          - unique
+      - name: ptid
+        data_type: TEXT
+        description: The patient ID associated with the image
+        data_tests:
+          - not_null
+      - name: study_id
+        data_type: INTEGER
+        description: The LONI study ID associated with the image
+        data_tests:
+          - not_null
+      - name: visit_code_normed
+        data_type: TEXT
+        description: |
+          The normalized visit code associated with the image, which standardizes various 
+          formats for baseline visits (e.g., 'BL', 'SC', 'INIT', '4_BL', '4_INIT', '4_SC')
+        data_tests:
+          - not_null
+      - name: image_date
+        data_type: DATE
+        description: The date the image was taken
+        data_tests:
+          - not_null
+      - name: image_description
+        data_type: TEXT
+        description: The type of MRI image (e.g., "MP-RAGE", "SPGR", etc.)
+        data_tests:
+          - not_null

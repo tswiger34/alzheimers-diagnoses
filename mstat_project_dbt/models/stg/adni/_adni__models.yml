@@ -373,7 +373,7 @@ models:
           - not_null
           - accepted_values:
               arguments:
-                values: ["ADNI1", "ADNI2", "ADNI3", "ADNI4", "ADNIGO"]
+                values: ["ADNI1", "ADNI2", "ADNIGO/ADNI2", "ADNI3", "ADNI4", "ADNIGO"]
       - name: series_description
         data_type: TEXT
         description: The description of the MRI series
@@ -428,7 +428,7 @@ models:
           - not_null
           - accepted_values:
               arguments:
-                values: ["3T"]
+                values: ["3T", "3", "1.5T", "1.5"]
       - name: receive_coil_name
         data_type: TEXT
         description: The name of the receive coil used during MRI acquisition

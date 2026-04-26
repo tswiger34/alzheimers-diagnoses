@@ -1,23 +1,26 @@
-from typing import Generator
+import os
 
-import polars as pl
+import sqlalchemy
 
 
-def clean_str_col_exprs(raw_df: pl.DataFrame) -> Generator[pl.Expr, None, None]:
-    """Creates polars expresions for cleaning and normalizing string columns, except for IDs
+def get_db_engine() -> sqlalchemy.Engine:
+    user = os.getenv(key="POSTGRES_USER", default="postgres")
+    password = os.getenv(key="POSTGRES_PASSWORD")
+    db_name = os.getenv(key="POSTGRES_DB_NAME", default="mstat-db")
+    host = os.getenv(key="POSTGRES_HOST", default="127.0.0.1")
+    port = os.getenv(key="POSTGRES_PORT", default="5434")
 
-    It does this by iterating over all of the string columns in the data frame that are not suffixed with '_id',
-    converts it to uppercase, strips trailing and leading white space, then replaces empty strings with `None`
-    so that they will register as nulls.
+    if password is None:
+        raise ValueError("No password set for connecting to Postgres DB")
 
-    Args:
-        raw_df (pl.DataFrame): The raw data frame that needs to be cleaned
+    url = f"postgresql+psycopg2://{user}:{password}@{host}:{int(port)}/{db_name}"
+    return sqlalchemy.create_engine(url)
 
-    Yields:
-        Generator[Expr, None, None]: Polars expressions for cleaning and normalizing string columns
-    """
-    for col_name, dtype in raw_df.schema.items():
-        if isinstance(dtype, pl.String) and not col_name.endswith("_id"):
-            yield pl.col(name=col_name).str.to_uppercase().str.strip_chars().replace(old="", new=None)
-        else:
-            continue
+
+if __name__ == "__main__":
+    import polars as pl
+
+    eng = get_db_engine()
+    with eng.connect() as conn:
+        df = pl.read_database(query="SELECT * FROM _stg.stg_image_manifest LIMIT 100", connection=conn)
+        print(df.head())

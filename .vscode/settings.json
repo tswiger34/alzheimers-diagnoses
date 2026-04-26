@@ -17,8 +17,11 @@
 		}
 	},
 	"python.terminal.activateEnvInCurrentTerminal": true,
-	"python.testing.pytestArgs": ["tests"],
+	"python.testing.pytestArgs": [
+		"tests"
+	],
 	"python.testing.unittestEnabled": false,
 	"python.testing.pytestEnabled": true,
-	"python.terminal.useEnvFile": true
+	"python.terminal.useEnvFile": true,
+	"ty.inlayHints.variableTypes": false
 }
