@@ -1,3 +1,4 @@
+
 WITH casted AS (
     SELECT
         {{ norm_text_codes('"image_id"') }}::INTEGER AS image_id,
@@ -13,8 +14,25 @@ WITH casted AS (
 normed AS (
     SELECT
         *,
+        ptid || '-' || visit_code AS ptid_visit_code,
         {{ norm_viscodes('visit_code') }} AS visit_code_normed
     FROM casted
+),
+
+img_info AS (
+    SELECT
+        *,
+        ROW_NUMBER() OVER (
+            PARTITION BY
+                ptid
+            ORDER BY image_date
+        ) AS ptid_img_number,
+        ROW_NUMBER() OVER (
+            PARTITION BY
+                ptid_visit_code
+            ORDER BY image_date
+        ) AS ptid_visit_img_number
+    FROM normed
 )
 
 SELECT
@@ -22,7 +40,10 @@ SELECT
     ptid,
     study_id,
     series_id,
+    visit_code AS visit_code_raw,
     visit_code_normed,
     image_date,
-    image_description
-FROM normed
+    image_description,
+    ptid_img_number,
+    ptid_visit_img_number
+FROM img_info

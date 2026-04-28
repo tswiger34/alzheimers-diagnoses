@@ -30,8 +30,25 @@ WITH casted AS (
 normed AS (
     SELECT
         *,
+        ptid || '-' || study_phase AS ptid_study_phase,
+        visit_code AS visit_code_raw,
         {{ norm_viscodes('visit_code') }} AS visit_code_normed
     FROM casted
+),
+img_info AS (
+SELECT
+    *,
+    ROW_NUMBER() OVER (
+        PARTITION BY
+            ptid_study_phase
+        ORDER BY study_phase, image_date
+    ) AS ptid_study_img_number,
+    ROW_NUMBER() OVER (
+        PARTITION BY
+            ptid
+        ORDER BY image_date
+    ) AS ptid_img_number
+FROM normed
 ),
 
 get_flags AS (
@@ -54,7 +71,7 @@ get_flags AS (
             WHEN acceleration IS NULL THEN NULL
             ELSE 1
         END AS is_accelerated
-    FROM normed        
+    FROM img_info        
 )
 
 SELECT
@@ -84,5 +101,7 @@ SELECT
     is_mprage::BOOL,
     is_mprage_repeat::BOOL,
     is_repeat::BOOL,
-    is_accelerated::BOOL
+    is_accelerated::BOOL,
+    ptid_study_img_number,
+    ptid_img_number
 FROM get_flags

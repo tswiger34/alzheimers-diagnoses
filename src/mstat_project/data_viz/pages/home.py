@@ -73,41 +73,6 @@ DASHBOARD_CARDS: list[DashboardCard] = [
     },
 ]
 
-PIPELINE_STEPS = [
-    "Curate participant-level clinical and imaging records.",
-    "Audit metadata and scan availability before tensor generation.",
-    "Run deep learning experiments and compare model behavior.",
-    "Interpret outputs through cohort context and image review.",
-]
-
-RESEARCH_SIGNALS = [
-    ("4", "dashboard surfaces"),
-    ("MRI", "imaging-first workflow"),
-    ("DL", "experiment iteration loop"),
-]
-
-
-def build_signal_badges() -> list[html.Div]:
-    return [
-        html.Div(
-            style={
-                "display": "flex",
-                "flexDirection": "column",
-                "gap": "2px",
-                "padding": "16px 18px",
-                "borderRadius": "18px",
-                "backgroundColor": "rgba(255, 255, 255, 0.62)",
-                "border": f"1px solid {PALETTE['line']}",
-                "minWidth": "120px",
-            },
-            children=[
-                html.Span(value, style={"fontSize": "1.35rem", "fontWeight": 700, "color": PALETTE["ink"]}),
-                html.Span(label, style={"fontSize": "0.84rem", "color": PALETTE["muted"]}),
-            ],
-        )
-        for value, label in RESEARCH_SIGNALS
-    ]
-
 
 def build_dashboard_cards() -> list[dcc.Link]:
     cards = []
@@ -224,8 +189,8 @@ layout = html.Div(
                                 ),
                                 style={
                                     "margin": "0",
-                                    "fontSize": "clamp(2.6rem, 5vw, 4.5rem)",
-                                    "lineHeight": "1.02",
+                                    "fontSize": "clamp(2.6rem, 5vw, 4.4rem)",
+                                    "lineHeight": "1.00",
                                     "fontFamily": TITLE_FONT,
                                     "color": PALETTE["ink"],
                                     "maxWidth": "10ch",
@@ -287,10 +252,6 @@ layout = html.Div(
                                 ],
                             ),
                             html.Div(
-                                style={"display": "flex", "flexWrap": "wrap", "gap": "12px"},
-                                children=build_signal_badges(),
-                            ),
-                            html.Div(
                                 style={
                                     "paddingTop": "12px",
                                     "borderTop": "1px solid rgba(255, 255, 255, 0.18)",
@@ -316,84 +277,6 @@ layout = html.Div(
                     ),
                 ],
             ),
-        ),
-        html.Section(
-            style={
-                **SECTION_STYLE,
-                "padding": "34px 36px",
-                "display": "grid",
-                "gridTemplateColumns": "minmax(0, 1.2fr) minmax(260px, 0.8fr)",
-                "gap": "24px",
-            },
-            children=[
-                html.Div(
-                    style={"display": "flex", "flexDirection": "column", "gap": "14px"},
-                    children=[
-                        html.Span(
-                            "Project overview",
-                            style={
-                                "fontSize": "0.76rem",
-                                "fontWeight": 700,
-                                "letterSpacing": "0.16em",
-                                "textTransform": "uppercase",
-                                "color": PALETTE["accent_dark"],
-                                "fontFamily": BODY_FONT,
-                            },
-                        ),
-                        html.H2(
-                            "A single front door for cohort, imaging, and model review.",
-                            style={
-                                "margin": "0",
-                                "fontSize": "2rem",
-                                "fontFamily": TITLE_FONT,
-                                "color": PALETTE["ink"],
-                            },
-                        ),
-                        html.P(
-                            "Use this space to orient collaborators quickly: what data is available, which scans made it into the workflow, how qualitative review is performed, and where experiment outcomes can be interrogated.",
-                            style={
-                                "margin": "0",
-                                "fontSize": "1rem",
-                                "lineHeight": "1.75",
-                                "color": PALETTE["muted"],
-                                "fontFamily": BODY_FONT,
-                            },
-                        ),
-                    ],
-                ),
-                html.Div(
-                    style={
-                        "padding": "22px",
-                        "borderRadius": "24px",
-                        "background": "linear-gradient(180deg, rgba(237, 246, 243, 0.95) 0%, rgba(255, 255, 255, 0.8) 100%)",
-                        "border": f"1px solid {PALETTE['line']}",
-                        "display": "flex",
-                        "flexDirection": "column",
-                        "gap": "10px",
-                    },
-                    children=[
-                        html.Span(
-                            "Operational lens",
-                            style={
-                                "fontSize": "0.74rem",
-                                "fontWeight": 700,
-                                "letterSpacing": "0.16em",
-                                "textTransform": "uppercase",
-                                "color": PALETTE["gold"],
-                            },
-                        ),
-                        html.Div(
-                            "Designed for research demos, internal reviews, and quick exploratory checks across the project lifecycle.",
-                            style={
-                                "fontSize": "1rem",
-                                "lineHeight": "1.75",
-                                "color": PALETTE["ink"],
-                                "fontFamily": BODY_FONT,
-                            },
-                        ),
-                    ],
-                ),
-            ],
         ),
         html.Section(
             id="dashboard-overview",
