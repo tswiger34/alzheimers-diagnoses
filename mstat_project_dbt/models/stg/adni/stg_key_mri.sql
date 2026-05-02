@@ -31,10 +31,10 @@ normed AS (
     SELECT
         *,
         ptid || '-' || study_phase AS ptid_study_phase,
-        visit_code AS visit_code_raw,
         {{ norm_viscodes('visit_code') }} AS visit_code_normed
     FROM casted
 ),
+
 img_info AS (
 SELECT
     *,

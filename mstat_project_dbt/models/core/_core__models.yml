@@ -4,15 +4,18 @@ models:
   - name: core_image_set
     description: |
       The final set of images that will be used for analysis. The resulting data set will have represent 1 image,
-      and be unique at the patient-visit code leve. 
+      and be unique at the patient-visit code level. 
 
       Images were selected based on the following criteria:
 
         1. Must have no QC errors
         2. Must be in both the image manifest and key_mri datasets
-        3. Image ID, patient ID, and visit code cannot be null
+        3. Must be an MPRAGE series type
+        4. 
+
         4. If multiple images are available for a patient-visit code, then the following criteria are applied:
           a. *Post Processing*: All post processing > MP-RAGE > No post processing
+
     config:
       indexes:
         - type: btree
@@ -20,7 +23,8 @@ models:
           columns: [image_id]
         - type: btree
           unique: true
-          columns: [ptid, visit_code_normed]
+          columns: [ptid, visit_code]
+
     columns:
       - name: image_id
         data_type: TEXT
@@ -38,10 +42,10 @@ models:
         description: The LONI study ID associated with the image
         data_tests:
           - not_null
-      - name: visit_code_normed
+      - name: visit_code
         data_type: TEXT
         description: |
-          The normalized visit code associated with the image, which standardizes various 
+          The normalized visit code associated with the image, which standardizes various
           formats for baseline visits (e.g., 'BL', 'SC', 'INIT', '4_BL', '4_INIT', '4_SC')
         data_tests:
           - not_null
