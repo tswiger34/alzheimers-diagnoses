@@ -7,10 +7,13 @@ from dataclasses import dataclass  # noqa
 from datetime import datetime  # noqa
 from typing import Self
 
+COHORTS = {i for i in range(1, 13)}
+
 
 @dataclass(slots=True)
 class RunMetadata:
     run_id: str
+    cohort: int
     run_start_time: datetime
     run_end_time: datetime
     run_total_time_sec: float
@@ -75,26 +78,11 @@ class ImageVolumePathMetadata:
         return root_folder, ptid, series_type, visit_timestamp, img_id, img_name
 
 
-@dataclass(slots=True)
-class ImageFolderPathMetadata:
-    img_folder_path: str
-    n_volumes: int
-    img_id: str
-    img_timestamp: str
-    img_series_type: str
-    ptid: str
-    volume_metadata: list[ImageVolumePathMetadata]
-
-
-def validate_path_metadata(
-    image_folder_path_metadata: ImageFolderPathMetadata, image_volume_metadata: ImageVolumePathMetadata
-): ...
-
-
-def read_image_paths_from_zip(file_name: str):
+def read_image_paths_from_zip(cohort: int):
     run_id = str(uuid.uuid4())
     start_time = datetime.now()
     data_path = os.getenv(key="DATA_PATH", default="data")
+    file_name = f"cohort_{cohort}.zip"
     file = pathlib.Path(data_path) / "raw_images" / file_name
     with zipfile.ZipFile(file=file, mode="r") as f:
         files = f.filelist
@@ -108,13 +96,13 @@ def read_image_paths_from_zip(file_name: str):
             for file in files
             if not file.filename.endswith(".dcm")
         ]
-        n_sub_dirs = set([file.n_sub_dirs for file in dcm_files])
-        print(f"Number of sub directories in DCM files: {n_sub_dirs}")
+        ##  TODO: Write metadata to db
 
     end_time = datetime.now()
     total_time = (end_time - start_time).total_seconds()
     run_metadata = RunMetadata(
         run_id=run_id,
+        cohort=cohort,
         run_start_time=start_time,
         run_end_time=end_time,
         run_total_time_sec=total_time,
@@ -127,5 +115,5 @@ def read_image_paths_from_zip(file_name: str):
 
 
 if __name__ == "__main__":
-    run_metadata = read_image_paths_from_zip(file_name="cohort_12.zip")
+    run_metadata = read_image_paths_from_zip(cohort=12)
     print(run_metadata)
