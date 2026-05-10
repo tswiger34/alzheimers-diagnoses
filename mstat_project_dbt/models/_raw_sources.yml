@@ -1,0 +1,6 @@
+sources:
+  - name: raw
+    database: "{{ env_var('POSTGRES_DB_NAME') }}"
+    schema: raw
+    tables:
+      - name: raw_downloaded_mri_metadata

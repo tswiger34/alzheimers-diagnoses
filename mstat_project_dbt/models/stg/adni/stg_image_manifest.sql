@@ -16,6 +16,7 @@ normed AS (
         *,
         ptid || '-' || visit_code AS ptid_visit_code,
         {{ norm_viscodes('visit_code') }} AS visit_code_normed
+        
     FROM casted
 ),
 
@@ -25,12 +26,12 @@ img_info AS (
         ROW_NUMBER() OVER (
             PARTITION BY
                 ptid
-            ORDER BY image_date
+            ORDER BY image_date, image_description
         ) AS ptid_img_number,
         ROW_NUMBER() OVER (
             PARTITION BY
                 ptid_visit_code
-            ORDER BY image_date
+            ORDER BY image_date, image_description
         ) AS ptid_visit_img_number
     FROM normed
 )

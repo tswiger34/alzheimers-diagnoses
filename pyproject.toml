@@ -13,6 +13,7 @@ dependencies = [
     "dbt-postgres>=1.10.0",
     "ltsa",
     "matplotlib>=3.10.9",
+    "nibabel>=5.4.2",
     "numpy>=2.4.2",
     "patito>=0.8.6",
     "plotly>=6.7.0",
