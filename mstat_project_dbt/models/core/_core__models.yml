@@ -4,30 +4,86 @@ models:
   - name: core_image_set
     description: |
       The final set of images that will be used for analysis. The resulting data set will have represent 1 image,
-      and be unique at the patient-visit code level. 
+      and be unique at the patient-study-visit code level. 
 
       Images were selected based on the following criteria:
 
         1. Must have no QC errors
         2. Must be in both the image manifest and key_mri datasets
-        3. Must be an MPRAGE series type
-        4. 
-
-        4. If multiple images are available for a patient-visit code, then the following criteria are applied:
-          a. *Post Processing*: All post processing > MP-RAGE > No post processing
+        3. Must be an MP-RAGE series type
+        4. If multiple images meet the above criteria for a given patient-study-visit code then:
+            a. If one image is labeled as "repeat" and the other is not, then the image that is not labeled as 
+              "repeat" is selected
+            b. If no images are labeled as "preferred" then the image with the earliest image date is selected
 
     config:
       indexes:
         - type: btree
           unique: true
+          columns: [ptid_visit_date]
+        - type: btree
+          unique: true
+          columns: [ptid_img_number, ptid]
+        - type: btree
+          unique: true
           columns: [image_id]
         - type: btree
           unique: true
-          columns: [ptid, visit_code]
+          columns: [ptid, study_id, visit_code]
+        - type: btree
+          unique: true
+          columns: [ptid, study_id, image_date]
+
+    data_tests:
+      - dbt_expectations.expect_column_pair_values_to_be_equal:
+          arguments:
+            column_A: image_id
+            column_B: loni_image_id
+      - dbt_expectations.expect_column_pair_values_to_be_equal:
+          arguments:
+            column_A: ptid
+            column_B: key_mri_ptid
+      - dbt_expectations.expect_column_pair_values_to_be_equal:
+          arguments:
+            column_A: visit_code
+            column_B: key_mri_visit_code_normed
+      - dbt_expectations.expect_column_pair_values_to_be_equal:
+          arguments:
+            column_A: image_date
+            column_B: key_mri_image_date
+      - dbt_expectations.expect_column_pair_values_to_be_equal:
+          arguments:
+            column_A: image_description
+            column_B: key_mri_image_description
 
     columns:
-      - name: image_id
+      - name: ptid_visit_date
         data_type: TEXT
+        description: |
+          A unique identifier for each patient-study-visit code combination, created by concatenating the 
+          patient ID and the image date.
+        data_tests:
+          - not_null
+          - unique
+      - name: ptid_img_number
+        data_type: INTEGER
+        description: |
+          The image number by patient, in ascending order of image date (i.e., the first image for each 
+          patient will have a ptid_img_number of 1)
+        data_tests:
+          - not_null
+          - dbt_expectations.expect_column_max_to_be_between:
+              arguments:
+                min_value: 3
+      - name: ptid_visit_img_number
+        data_type: INTEGER
+        description: |
+          The image number by patient-study-visit code combination, used to ensure no repeats/duplicates by patient
+          and visit date.
+        data_tests:
+          - not_null
+      - name: image_id
+        data_type: INTEGER
         description: The unique identifier for each image in the ADNI image manifest
         data_tests:
           - not_null
@@ -40,6 +96,11 @@ models:
       - name: study_id
         data_type: INTEGER
         description: The LONI study ID associated with the image
+        data_tests:
+          - not_null
+      - name: series_id
+        data_type: INTEGER
+        description: The LONI series ID associated with the image
         data_tests:
           - not_null
       - name: visit_code
@@ -59,3 +120,117 @@ models:
         description: The type of MRI image (e.g., "MP-RAGE", "SPGR", etc.)
         data_tests:
           - not_null
+      - name: key_mri_ptid
+        data_type: TEXT
+        description: The patient ID associated with the MRI image in the key MRI dataset
+        data_tests:
+          - not_null
+      - name: key_mri_visit_code_normed
+        data_type: TEXT
+        description: |
+          The normalized visit code associated with the MRI image in the key MRI dataset, which standardizes
+          various formats for baseline visits (e.g., 'BL', 'SC', 'INIT', '4_BL', '4_INIT', '4_SC')
+        data_tests:
+          - not_null
+      - name: key_mri_image_date
+        data_type: DATE
+        description: The date the image was taken according to the key MRI dataset
+        data_tests:
+          - not_null
+      - name: key_mri_series_type
+        data_type: TEXT
+        description: The type of MRI series from the key MRI dataset
+        data_tests:
+          - not_null
+      - name: key_mri_study_phase
+        data_type: TEXT
+        description: The phase of the ADNI study during which the MRI image was collected
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  ["ADNI1", "ADNI2", "ADNIGO/ADNI2", "ADNI3", "ADNI4", "ADNIGO"]
+      - name: key_mri_image_description
+        data_type: TEXT
+        description: The description of the MRI series from the key MRI dataset
+        data_tests:
+          - not_null
+      - name: acceleration
+        data_type: TEXT
+        description: The acceleration factor used during MRI acquisition
+        data_tests:
+          - not_null
+      - name: acquisition_type
+        data_type: TEXT
+        description: The type of acquisition used during MRI scanning
+        data_tests:
+          - not_null
+      - name: acquisition_plane
+        data_type: TEXT
+        description: The plane of acquisition used during MRI scanning
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["SAGITTAL"]
+      - name: number_volumes
+        data_type: INTEGER
+        description: The number of volumes (collections of slices) in the MRI series
+        data_tests:
+          - not_null
+      - name: slices_per_volume
+        data_type: INTEGER
+        description: The number of slices per volume in the MRI series
+        data_tests:
+          - not_null
+      - name: slice_thickness_mm
+        data_type: NUMERIC
+        description: The thickness of each slice in the MRI series, measured in millimeters
+        data_tests:
+          - not_null
+      - name: scanner_manufacturer
+        data_type: TEXT
+        description: The manufacturer of the MRI scanner used to acquire the image
+      - name: scanner_model
+        data_type: TEXT
+        description: The model of the MRI scanner used to acquire the image
+      - name: magnetic_field_strength_tesla
+        data_type: TEXT
+        description: The magnetic field strength of the MRI scanner used to acquire the image, measured in Tesla
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["3T", "3", "1.5T", "1.5"]
+      - name: loni_image_id
+        data_type: INTEGER
+        description: The LONI image ID associated with the MRI image
+        data_tests:
+          - not_null
+      - name: is_mprage
+        data_type: BOOLEAN
+        description: Indicates whether the image is an MP-RAGE series
+        data_tests:
+          - not_null
+      - name: is_mprage_repeat
+        data_type: BOOLEAN
+        description: Indicates whether the image is an MP-RAGE repeat series
+        data_tests:
+          - not_null
+      - name: is_repeat
+        data_type: BOOLEAN
+        description: Indicates whether the image is marked as a repeat series
+        data_tests:
+          - not_null
+      - name: is_accelerated
+        data_type: BOOLEAN
+        description: Indicates whether the MRI acquisition was accelerated
+      - name: days_since_prior_image
+        data_type: INTEGER
+        description: |
+          The number of days between the image date of the current image and the prior image of the patient
+      - name: days_since_baseline
+        data_type: INTEGER
+        description: |
+          The number of days between the image date of the current image and the baseline image date of the patient

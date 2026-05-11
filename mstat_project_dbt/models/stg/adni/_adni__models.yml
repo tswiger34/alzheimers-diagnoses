@@ -123,6 +123,8 @@ models:
         description: The timestamp of the last update
   - name: stg_downloaded_mri_metadata
     description: Staging model for the metadata of the downloaded MRI images from ADNI.
+    config:
+      enabled: false
     columns:
       - name: run_id
         data_type: TEXT

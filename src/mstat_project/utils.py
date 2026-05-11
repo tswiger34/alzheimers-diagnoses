@@ -1,9 +1,11 @@
 import os
 
 import sqlalchemy
+from dotenv import load_dotenv
 
 
 def get_db_engine() -> sqlalchemy.Engine:
+    load_dotenv()
     user = os.getenv(key="POSTGRES_USER", default="postgres")
     password = os.getenv(key="POSTGRES_PASSWORD")
     db_name = os.getenv(key="POSTGRES_DB_NAME", default="mstat-db")

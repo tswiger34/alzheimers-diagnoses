@@ -11,6 +11,7 @@ dependencies = [
     "dash>=4.1.0",
     "dbt-core>=1.11.7",
     "dbt-postgres>=1.10.0",
+    "dcm2niix>=1.0.20260416",
     "ltsa",
     "matplotlib>=3.10.9",
     "nibabel>=5.4.2",
@@ -45,4 +46,83 @@ members = [
 ltsa = { workspace = true }
 
 [tool.ty.src]
+
 exclude = ["tests"]
+[tool.sqlfluff.core]
+templater = "dbt"
+sql_file_exts = ".sql"
+dialect = "postgres"
+max_line_length = 120
+
+[sqlfluff.templater.dbt]
+project_dir = "./mstat_project_dbt/"
+
+[tool.sqlfluff.indentation]
+indented_joins = false
+indented_using_on = true
+template_blocks_indent = false
+
+[tool.sqlfluff.templater]
+unwrap_wrapped_queries = true
+
+[tool.sqlfluff.templater.jinja]
+apply_dbt_builtins = true
+
+[tool.sqlfluff.rules.capitalisation.keywords]
+capitalisation_policy = "upper"
+
+[tool.ruff]
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+]
+include = ["src/**/*.py"]
+respect-gitignore = true
+
+line-length = 115
+indent-width = 4
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B"]
+ignore = []
+
+fixable = ["ALL"]
+
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.format]
+quote-style = "double"
+
+indent-style = "space"
+
+skip-magic-trailing-comma = false
+
+line-ending = "auto"
+
+docstring-code-format = true
+
+docstring-code-line-length = "dynamic"

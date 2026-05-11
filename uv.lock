@@ -607,6 +607,21 @@ wheels = [
 ]
 
 [[package]]
+name = "dcm2niix"
+version = "1.0.20260416"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/72/df/5f62409d488b771e8b7b17bee8023d35c3f745af685df1a863c402f3adf7/dcm2niix-1.0.20260416.tar.gz", hash = "sha256:65ed563d218e38ea5a836a756bd1bd5298377489a70f44c06dc11b807969f4b6", size = 566798 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/87/f7/031d62ab7cfa104b6139f615c3e048d1e2d50ec4fe7441939dafd7f927d1/dcm2niix-1.0.20260416-cp38-abi3-macosx_10_9_x86_64.whl", hash = "sha256:6789bada369fc3c6c8f71521a2d8a615a27534f591757db4a9e616caecdb7ba4", size = 1086688 },
+    { url = "https://files.pythonhosted.org/packages/6a/8b/e7e64c05645d1a67d6e034a9a4fcff642f4cb6fdec16c1600618cde6bd42/dcm2niix-1.0.20260416-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:e16bd062eccffc7740e93250561b894c5664325bebfb8b59fbf90227b8ccdfc5", size = 1019193 },
+    { url = "https://files.pythonhosted.org/packages/99/00/42dcf199dd76f1d59acf8e53d71c1a36c672c29f72d7385f1d51d20e1cd3/dcm2niix-1.0.20260416-cp38-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:69e42958deffc7d71b323c17aab31555c43f6f1acac045cca810a4f5f5fb9261", size = 1998175 },
+    { url = "https://files.pythonhosted.org/packages/25/91/4adf9bd64a123cf0c1ffb882362bf79a0022a315d29abd8929bedaafdf70/dcm2niix-1.0.20260416-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c9c5e42819c18f58942c2ed138199e81f294f9c96874e29b675b737e1b69a596", size = 1949123 },
+    { url = "https://files.pythonhosted.org/packages/98/1a/64da2cfe3072cfacaa9dc5985d793de4279894ffe98d5805425b42f63b6e/dcm2niix-1.0.20260416-cp38-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:2eb75032ced26c3a66fb09b46dfa725b774b718914f4f29b10241702ae85da6c", size = 2285615 },
+    { url = "https://files.pythonhosted.org/packages/11/f9/b5e85eb70ac8d9289cfaf30c5a99079d9a89236254ab1827ddb6133c3b11/dcm2niix-1.0.20260416-cp38-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:cc1ef067b1b290118150eab7f4c44947321f058998dbcf018e714e2e9e389236", size = 2272582 },
+    { url = "https://files.pythonhosted.org/packages/22/7f/c87fad5be26a52cc0351a8aca4a4b7aa8f4ab7835467ae6715a7536504a8/dcm2niix-1.0.20260416-cp38-abi3-win_amd64.whl", hash = "sha256:7c03bd92cd72640061a25e86c16bda28e76a822b0d14ece8bd40a53244f30e1b", size = 2393233 },
+]
+
+[[package]]
 name = "debugpy"
 version = "1.8.20"
 source = { registry = "https://pypi.org/simple" }
@@ -1343,6 +1358,7 @@ dependencies = [
     { name = "dash" },
     { name = "dbt-core" },
     { name = "dbt-postgres" },
+    { name = "dcm2niix" },
     { name = "ltsa" },
     { name = "matplotlib" },
     { name = "nibabel" },
@@ -1375,6 +1391,7 @@ requires-dist = [
     { name = "dash", specifier = ">=4.1.0" },
     { name = "dbt-core", specifier = ">=1.11.7" },
     { name = "dbt-postgres", specifier = ">=1.10.0" },
+    { name = "dcm2niix", specifier = ">=1.0.20260416" },
     { name = "ltsa", editable = "packages/ltsa" },
     { name = "matplotlib", specifier = ">=3.10.9" },
     { name = "nibabel", specifier = ">=5.4.2" },
