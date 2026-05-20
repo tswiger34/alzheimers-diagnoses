@@ -5,13 +5,25 @@ import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+from types import UnionType
+from typing import Any, Union, get_args, get_origin
 
 import sqlalchemy
+from dotenv import load_dotenv
+from sqlalchemy.dialects.postgresql import JSONB
 
 from mstat_project.utils import get_db_engine
 
+from .models import NiFTiMetadata
+
+load_dotenv()
 COHORTS = list(range(1, 13))
+NIFTI_WORKERS_ENV_VAR = "NIFTI_WORKERS"
 DEFAULT_NIFTI_WORKERS = 16
+IMAGE_PATH = Path(os.getenv("IMAGE_PATH", "data/images"))
+NIFTI_IMAGE_PATH = IMAGE_PATH / "nifti"
+RAW_NIFTI_METADATA_SCHEMA = "_raw"
+RAW_NIFTI_METADATA_TABLE = "raw_nifti_metadata"
 
 
 @dataclass(frozen=True)
@@ -25,11 +37,18 @@ class DicomFolderResult:
     error: str | None = None
 
 
-def _resolve_max_workers(max_workers: int | None = DEFAULT_NIFTI_WORKERS) -> int:
+def _resolve_max_workers(max_workers: int | None = None) -> int:
     """Resolve the configured worker count."""
 
     if max_workers is None:
-        max_workers = min(DEFAULT_NIFTI_WORKERS, os.cpu_count() or 1)
+        raw_max_workers = os.getenv(NIFTI_WORKERS_ENV_VAR, str(DEFAULT_NIFTI_WORKERS))
+        try:
+            max_workers = int(raw_max_workers)
+        except ValueError as exc:
+            msg = f"{NIFTI_WORKERS_ENV_VAR} must be an integer, got {raw_max_workers!r}"
+            raise ValueError(msg) from exc
+
+        max_workers = min(max_workers, os.cpu_count() or 1)
 
     if max_workers < 1:
         msg = f"max_workers must be at least 1, got {max_workers}"
@@ -79,6 +98,36 @@ def _extract_dicom_members(zip_path: Path, member_names: list[str], output_dir: 
             out_path = output_dir / Path(member_name).name
             with zf.open(member_name) as src, open(out_path, "wb") as dst:
                 shutil.copyfileobj(src, dst)
+
+
+def _raw_images_path() -> Path:
+    """Return the directory containing raw cohort zip files."""
+
+    return Path(os.getenv("IMAGES_PATH", "data/raw_images/raw"))
+
+
+def _cohort_name(cohort: int) -> str:
+    """Return the canonical cohort folder/archive stem."""
+
+    return f"cohort_{str(cohort).zfill(2)}"
+
+
+def _raw_cohort_zip_path(cohort: int) -> Path:
+    """Return the raw DICOM archive path for a cohort."""
+
+    return _raw_images_path() / f"{_cohort_name(cohort)}.zip"
+
+
+def _nifti_cohort_dir(cohort: int) -> Path:
+    """Return the temporary output directory for converted NIfTI files."""
+
+    return NIFTI_IMAGE_PATH / _cohort_name(cohort)
+
+
+def _nifti_cohort_zip_path(cohort: int) -> Path:
+    """Return the archived converted NIfTI path for a cohort."""
+
+    return NIFTI_IMAGE_PATH / f"{_cohort_name(cohort)}.zip"
 
 
 async def dicom_to_nifti_async(dicom_dir: str | Path, output_dir: str | Path) -> None:
@@ -179,9 +228,8 @@ async def process_cohort_async(
 
     print(f"Processing Cohort: {cohort}")
 
-    data_path = Path(os.getenv("IMAGES_PATH", "data/raw_images"))
-    zfile_path = data_path / f"cohort_{str(cohort).zfill(2)}.zip"
-    output_base_dir = Path(f"data/images/nifti/cohort_{str(cohort).zfill(2)}")
+    zfile_path = _raw_cohort_zip_path(cohort)
+    output_base_dir = _nifti_cohort_dir(cohort)
     worker_count = _resolve_max_workers(max_workers)
 
     members_by_image_id = _find_selected_dicom_members(zfile_path, selected_ids)
@@ -269,6 +317,7 @@ def process_cohort(
 
 
 def process_all(
+    cohorts: list[int],
     *,
     max_workers: int | None = None,
     overwrite: bool = False,
@@ -280,7 +329,7 @@ def process_all(
     with db_eng.connect() as conn:
         result = conn.execute(statement=sqlalchemy.text(text="SELECT image_id FROM _core.core_image_set")).all()
     ids = set(str(row[0]) for row in result)
-    for cohort in COHORTS:
+    for cohort in cohorts:
         imgs_processed = process_cohort(
             cohort,
             selected_ids=ids,
@@ -293,8 +342,159 @@ def process_all(
     return ids
 
 
-if __name__ == "__main__":
-    ids = process_all()
+def _unwrap_optional_annotation(annotation: Any) -> Any:
+    """Return the concrete type from Optional[T] style annotations."""
+
+    origin = get_origin(annotation)
+    if origin not in (Union, UnionType):
+        return annotation
+
+    args = [arg for arg in get_args(annotation) if arg is not type(None)]
+    if len(args) != 1:
+        msg = f"Unsupported NIfTI metadata union field type: {annotation!r}"
+        raise TypeError(msg)
+
+    return args[0]
+
+
+def _metadata_column_type(annotation: Any) -> sqlalchemy.types.TypeEngine[Any]:
+    """Map NiFTiMetadata annotations to Postgres-compatible SQLAlchemy types."""
+
+    annotation = _unwrap_optional_annotation(annotation)
+
+    if get_origin(annotation) is list:
+        return JSONB()
+    if annotation is bool:
+        return sqlalchemy.Boolean()
+    if annotation is int:
+        return sqlalchemy.Integer()
+    if annotation is float:
+        return sqlalchemy.Double()
+    if annotation is str:
+        return sqlalchemy.Text()
+
+    msg = f"Unsupported NIfTI metadata field type: {annotation!r}"
+    raise TypeError(msg)
+
+
+def create_nifti_metadata_table() -> sqlalchemy.Table:
+    """Build the raw NIfTI metadata table definition."""
+
+    metadata = sqlalchemy.MetaData()
+    columns = [
+        sqlalchemy.Column("image_id", sqlalchemy.Text(), nullable=False),
+        sqlalchemy.Column("cohort", sqlalchemy.Text(), nullable=False),
+        sqlalchemy.Column("source_json_path", sqlalchemy.Text(), nullable=False),
+    ]
+
+    columns.extend(
+        sqlalchemy.Column(name, _metadata_column_type(field.annotation), nullable=True)
+        for name, field in NiFTiMetadata.model_fields.items()
+    )
+
+    return sqlalchemy.Table(
+        RAW_NIFTI_METADATA_TABLE,
+        metadata,
+        *columns,
+        schema=RAW_NIFTI_METADATA_SCHEMA,
+    )
+
+
+def _replace_cohort_metadata(records: list[dict[str, Any]], cohort_str: str) -> None:
+    """Replace raw NIfTI metadata for one cohort in a single transaction."""
+
+    db_eng = get_db_engine()
+    with db_eng.begin() as conn:
+        table = create_nifti_metadata_table()
+        conn.execute(sqlalchemy.text(f"CREATE SCHEMA IF NOT EXISTS {RAW_NIFTI_METADATA_SCHEMA}"))
+        table.create(bind=conn, checkfirst=True)
+
+        conn.execute(table.delete().where(table.c.cohort == cohort_str))
+
+        if not records:
+            return
+        conn.execute(table.insert(), records)
+        return
+
+
+def get_image_id_from_json_member(member_name: str) -> str:
+    """Derive the ADNI image ID from a converted metadata JSON archive member."""
+
+    member_path = Path(member_name)
+    image_id = member_path.parent.name
+    if not image_id:
+        msg = f"Cannot derive image_id from metadata path {member_name!r}"
+        raise ValueError(msg)
+
+    return image_id
+
+
+def get_metadata_record_from_json_text(
+    *,
+    contents: str,
+    source_json_path: str,
+    cohort_str: str,
+) -> dict[str, Any]:
+    """Validate one metadata JSON archive member into a database record."""
+
+    metadata = NiFTiMetadata.model_validate_json(contents, strict=False)
+    record = metadata.model_dump(mode="json", include=set(NiFTiMetadata.model_fields))
+    return {
+        "image_id": get_image_id_from_json_member(source_json_path),
+        "cohort": cohort_str,
+        "source_json_path": source_json_path,
+        **record,
+    }
+
+
+async def load_cohort_metadata_records(cohort: int) -> tuple[str, list[dict[str, Any]]]:
+    """Extract and validate all metadata records from one converted cohort archive."""
+
+    cohort_str = str(cohort).zfill(2)
+    zip_path = _nifti_cohort_zip_path(cohort)
+
+    with zipfile.ZipFile(zip_path, mode="r") as zf:
+        json_files = [
+            file.filename
+            for file in zf.filelist
+            if not file.is_dir() and Path(file.filename).suffix.lower() == ".json"
+        ]
+
+        records = [
+            get_metadata_record_from_json_text(
+                contents=zf.read(json_file).decode("utf-8"),
+                source_json_path=json_file,
+                cohort_str=cohort_str,
+            )
+            for json_file in json_files
+        ]
+
+    return cohort_str, list(records)
+
+
+async def load_cohort_metadata(cohort: int) -> None:
+    cohort_str, records = await load_cohort_metadata_records(cohort)
+    await asyncio.to_thread(_replace_cohort_metadata, records, cohort_str)
+
+
+def load_all_metadata(cohorts: list[int] = COHORTS) -> None:
+    """Load raw NIfTI JSON metadata for all requested cohorts."""
+
+    async def load_all() -> None:
+        for cohort in cohorts:
+            await load_cohort_metadata(cohort)
+
+    asyncio.run(load_all())
+
+
+def main(cohorts: list[int] = COHORTS) -> None:
+    ids = process_all(cohorts)
     print(len(ids))
     if len(ids) > 0:
         print(ids)
+    load_all_metadata()
+
+
+if __name__ == "__main__":
+    # main()
+    load_all_metadata()

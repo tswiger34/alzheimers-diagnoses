@@ -6,6 +6,8 @@ readme = "README.md"
 requires-python = ">=3.13"
 
 dependencies = [
+    "aiocsv>=1.4.0",
+    "aiofiles>=25.1.0",
     "altair>=6.0.0",
     "dagster>=1.13.2",
     "dash>=4.1.0",

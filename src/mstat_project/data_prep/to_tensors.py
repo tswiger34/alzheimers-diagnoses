@@ -2,9 +2,13 @@ import nibabel as nib  # noqa
 import os
 import json
 from .models import NiFTiMetadata  # noqa
+from pathlib import Path
+from dotenv import load_dotenv
 
-NIFTI_IMAGE_PATH = os.getenv("NIFTI_IMAGE_PATH", "data/images/nifti")
-TENSOR_OUTPUT_PATH = os.getenv("TENSOR_IMAGE_PATH", "data/images/nifti")
+load_dotenv()
+IMAGE_PATH = Path(os.getenv("IMAGE_PATH", "data/images"))
+NIFTI_IMAGE_PATH = IMAGE_PATH / "nifti"
+TENSOR_OUTPUT = IMAGE_PATH / "tensors"
 
 
 def load_input_image(img_folder: str):
