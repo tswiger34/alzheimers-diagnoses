@@ -2,23 +2,13 @@ import dash
 import polars as pl
 from dash import html
 
-from mstat_project.data_viz.components.metric_card import MetricCard  # noqa
-from mstat_project.utils import get_db_engine
+from mstat_project.data_viz.components.metric_card import MetricCard
+from mstat_project.data_viz.utils import get_dataset
 
 dash.register_page(module=__name__, name="Image Metadata")
 
 
-def _get_dataset(tbl_name: str, limit: int | None = None) -> pl.DataFrame:
-    eng = get_db_engine()
-    with eng.connect() as conn:
-        query = "SELECT * FROM %s" % tbl_name
-        if limit is not None:
-            query = "%s LIMIT %i" % (query, limit)
-        df = pl.read_database(query, connection=conn)
-    return df
-
-
-core_df = _get_dataset(tbl_name="_core.core_image_set")
+core_df = get_dataset(tbl_name="_core.core_image_set")
 
 
 def get_patient_counts(core_df: pl.DataFrame):

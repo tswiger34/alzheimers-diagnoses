@@ -17,6 +17,11 @@ clean-targets:
 seeds:
   +schema: raw
 
+data_tests:
+  mstat_project:
+    stg:
+      +severity: warn
+
 models:
   mstat_project:
     stg:

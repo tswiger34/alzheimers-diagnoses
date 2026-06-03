@@ -1,6 +1,185 @@
 sources:
   - name: raw
     database: "{{ env_var('POSTGRES_DB_NAME') }}"
-    schema: raw
+    schema: _raw
     tables:
-      - name: raw_downloaded_mri_metadata
+      - name: raw_nifti_metadata
+        description: "Metadata extracted from NIfTI using the JSON sidecar files."
+        columns:
+          - name: image_id
+            data_type: TEXT
+            description: ADNI image identifier associated with the NIfTI sidecar.
+          - name: cohort
+            data_type: TEXT
+            description: Download cohort for batched image processing.
+          - name: source_json_path
+            data_type: TEXT
+            description: Relative path to the JSON sidecar used as the metadata source.
+          - name: modality
+            data_type: TEXT
+            description: Imaging modality.
+          - name: magnetic_field_strength
+            data_type: FLOAT
+            description: Magnetic field strength of the scanner in Tesla.
+          - name: imaging_frequency
+            data_type: FLOAT
+            description: Imaging frequency used during acquisition.
+          - name: manufacturer
+            data_type: TEXT
+            description: Scanner manufacturer.
+          - name: manufacturers_model_name
+            data_type: TEXT
+            description: Scanner model name.
+          - name: institution_name
+            data_type: TEXT
+            description: Institution where the scan was acquired.
+          - name: device_serial_number
+            data_type: TEXT
+            description: Scanner device serial number.
+          - name: body_part
+            data_type: TEXT
+            description: Body part examined.
+          - name: patient_position
+            data_type: TEXT
+            description: Patient position during image acquisition.
+          - name: software_versions
+            data_type: TEXT
+            description: Scanner software version string.
+          - name: mr_acquisition_type
+            data_type: TEXT
+            description: MRI acquisition type.
+          - name: study_description
+            data_type: TEXT
+            description: DICOM study description.
+          - name: series_description
+            data_type: TEXT
+            description: DICOM series description.
+          - name: protocol_name
+            data_type: TEXT
+            description: Protocol name used for the acquisition.
+          - name: scanning_sequence
+            data_type: TEXT
+            description: DICOM scanning sequence.
+          - name: sequence_variant
+            data_type: TEXT
+            description: DICOM sequence variant.
+          - name: scan_options
+            data_type: TEXT
+            description: Scan options used during acquisition.
+          - name: sequence_name
+            data_type: TEXT
+            description: Sequence name used by the scanner.
+          - name: image_type
+            data_type: JSONB
+            description: DICOM image type values from the sidecar.
+          - name: nonlinear_gradient_correction
+            data_type: BOOL
+            description: Indicator of whether nonlinear gradient correction was applied.
+          - name: series_number
+            data_type: INTEGER
+            description: DICOM series number.
+          - name: acquisition_time
+            data_type: TIME
+            description: Time when the image acquisition began.
+          - name: acquisition_number
+            data_type: INTEGER
+            description: DICOM acquisition number.
+          - name: slice_thickness
+            data_type: FLOAT
+            description: Slice thickness in millimeters.
+          - name: sar
+            data_type: FLOAT
+            description: Specific absorption rate.
+          - name: table_position
+            data_type: JSONB
+            description: Table position metadata from the sidecar, when available.
+          - name: echo_time
+            data_type: FLOAT
+            description: Echo time in seconds.
+          - name: repetition_time
+            data_type: FLOAT
+            description: Repetition time in seconds.
+          - name: spoiling_state
+            data_type: TEXT
+            description: Spoiling state metadata.
+          - name: inversion_time
+            data_type: FLOAT
+            description: Inversion time in seconds.
+          - name: flip_angle
+            data_type: FLOAT
+            description: Flip angle in degrees.
+          - name: partial_fourier
+            data_type: FLOAT
+            description: Partial Fourier factor.
+          - name: base_resolution
+            data_type: INTEGER
+            description: Base acquisition resolution.
+          - name: shim_setting
+            data_type: JSONB
+            description: Shim setting values from the sidecar.
+          - name: tx_ref_amp
+            data_type: FLOAT
+            description: Transmit reference amplitude.
+          - name: phase_resolution
+            data_type: FLOAT
+            description: Phase resolution factor.
+          - name: receive_coil_name
+            data_type: TEXT
+            description: Receive coil name.
+          - name: receive_coil_active_elements
+            data_type: TEXT
+            description: Active receive coil elements.
+          - name: pulse_sequence_details
+            data_type: TEXT
+            description: Pulse sequence details.
+          - name: ref_lines_pe
+            data_type: INTEGER
+            description: Number of reference lines in the phase-encoding direction.
+          - name: coil_combination_method
+            data_type: TEXT
+            description: Coil combination method.
+          - name: consistency_info
+            data_type: TEXT
+            description: Scanner consistency information.
+          - name: matrix_coil_mode
+            data_type: TEXT
+            description: Matrix coil mode.
+          - name: percent_phase_fov
+            data_type: FLOAT
+            description: Percent phase field of view.
+          - name: percent_sampling
+            data_type: FLOAT
+            description: Percent sampling used during acquisition.
+          - name: phase_encoding_steps
+            data_type: INTEGER
+            description: Number of phase-encoding steps.
+          - name: acquisition_matrix_pe
+            data_type: INTEGER
+            description: Acquisition matrix size in the phase-encoding direction.
+          - name: recon_matrix_pe
+            data_type: INTEGER
+            description: Reconstruction matrix size in the phase-encoding direction.
+          - name: parallel_reduction_factor_in_plane
+            data_type: FLOAT
+            description: In-plane parallel imaging reduction factor.
+          - name: pixel_bandwidth
+            data_type: FLOAT
+            description: Pixel bandwidth.
+          - name: dwell_time
+            data_type: FLOAT
+            description: Dwell time.
+          - name: image_orientation_patient_dicom
+            data_type: JSONB
+            description: DICOM image orientation patient vector.
+          - name: in_plane_phase_encoding_direction_dicom
+            data_type: TEXT
+            description: DICOM in-plane phase-encoding direction.
+          - name: bids_guess
+            data_type: JSONB
+            description: BIDS entity guess generated during conversion.
+          - name: conversion_software
+            data_type: TEXT
+            description: Software used to convert the image to NIfTI.
+          - name: conversion_software_version
+            data_type: TEXT
+            description: Version of the conversion software.

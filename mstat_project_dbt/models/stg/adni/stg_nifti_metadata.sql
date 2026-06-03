@@ -1,0 +1,167 @@
+WITH
+    src AS (
+        SELECT
+            NULLIF(TRIM(image_id::TEXT), '')::TEXT AS image_id,
+            NULLIF(TRIM(cohort::TEXT), '')::TEXT AS cohort,
+            NULLIF(TRIM(source_json_path::TEXT), '')::TEXT AS source_json_path,
+            UPPER(NULLIF(TRIM(modality::TEXT), ''))::TEXT AS modality,
+            NULLIF(TRIM(magnetic_field_strength::TEXT), '')::numeric AS magnetic_field_strength,
+            NULLIF(TRIM(imaging_frequency::TEXT), '')::FLOAT AS imaging_frequency,
+            NULLIF(TRIM(manufacturer::TEXT), '')::TEXT AS manufacturer,
+            NULLIF(TRIM(manufacturers_model_name::TEXT), '')::TEXT AS manufacturers_model_name,
+            NULLIF(TRIM(institution_name::TEXT), '')::TEXT AS institution_name,
+            NULLIF(TRIM(device_serial_number::TEXT), '')::TEXT AS device_serial_number,
+            NULLIF(TRIM(body_part::TEXT), '')::TEXT AS body_part,
+            NULLIF(TRIM(patient_position::TEXT), '')::TEXT AS patient_position,
+            NULLIF(TRIM(software_versions::TEXT), '')::TEXT AS software_versions,
+            UPPER(NULLIF(TRIM(mr_acquisition_type::TEXT), ''))::TEXT AS mr_acquisition_type,
+            UPPER(NULLIF(TRIM(study_description::TEXT), ''))::TEXT AS study_description,
+            UPPER(NULLIF(TRIM(series_description::TEXT), ''))::TEXT AS series_description,
+            NULLIF(TRIM(protocol_name::TEXT), '')::TEXT AS protocol_name,
+            NULLIF(TRIM(scanning_sequence::TEXT), '')::TEXT AS scanning_sequence,
+            NULLIF(UPPER(NULLIF(TRIM(sequence_variant::TEXT), '')),'NONE')::TEXT AS sequence_variant,
+            NULLIF(TRIM(scan_options::TEXT), '')::TEXT AS scan_options,
+            NULLIF(TRIM(sequence_name::TEXT), '')::TEXT AS sequence_name,
+            NULLIF(TRIM(image_type::TEXT), '')::JSONB AS image_type,
+            NULLIF(TRIM(nonlinear_gradient_correction::TEXT), '')::BOOL AS nonlinear_gradient_correction,
+            NULLIF(TRIM(series_number::TEXT), '')::INTEGER AS series_number,
+            NULLIF(TRIM(acquisition_time::TEXT), '')::TIME AS acquisition_time,
+            NULLIF(TRIM(acquisition_number::TEXT), '')::INTEGER AS acquisition_number,
+            NULLIF(TRIM(slice_thickness::TEXT), '')::FLOAT AS slice_thickness,
+            NULLIF(TRIM(sar::TEXT), '')::FLOAT AS sar,
+            NULLIF(TRIM(table_position::TEXT), '')::JSONB AS table_position,
+            NULLIF(TRIM(echo_time::TEXT), '')::FLOAT AS echo_time,
+            NULLIF(TRIM(repetition_time::TEXT), '')::FLOAT AS repetition_time,
+            NULLIF(TRIM(spoiling_state::TEXT), '')::BOOL AS spoiling_state,
+            NULLIF(TRIM(inversion_time::TEXT), '')::FLOAT AS inversion_time,
+            NULLIF(TRIM(flip_angle::TEXT), '')::FLOAT AS flip_angle,
+            NULLIF(TRIM(partial_fourier::TEXT), '')::FLOAT AS partial_fourier,
+            NULLIF(TRIM(base_resolution::TEXT), '')::INTEGER AS base_resolution,
+            NULLIF(TRIM(shim_setting::TEXT), '')::JSONB AS shim_setting,
+            NULLIF(TRIM(tx_ref_amp::TEXT), '')::FLOAT AS tx_ref_amp,
+            NULLIF(TRIM(phase_resolution::TEXT), '')::FLOAT AS phase_resolution,
+            NULLIF(TRIM(receive_coil_name::TEXT), '')::TEXT AS receive_coil_name,
+            NULLIF(TRIM(receive_coil_active_elements::TEXT), '')::TEXT AS receive_coil_active_elements,
+            NULLIF(TRIM(pulse_sequence_details::TEXT), '')::TEXT AS pulse_sequence_details,
+            NULLIF(TRIM(ref_lines_pe::TEXT), '')::INTEGER AS ref_lines_pe,
+            NULLIF(TRIM(coil_combination_method::TEXT), '')::TEXT AS coil_combination_method,
+            NULLIF(TRIM(consistency_info::TEXT), '')::TEXT AS consistency_info,
+            NULLIF(TRIM(matrix_coil_mode::TEXT), '')::TEXT AS matrix_coil_mode,
+            NULLIF(TRIM(percent_phase_fov::TEXT), '')::FLOAT AS percent_phase_fov,
+            NULLIF(TRIM(percent_sampling::TEXT), '')::FLOAT AS percent_sampling,
+            NULLIF(TRIM(phase_encoding_steps::TEXT), '')::INTEGER AS phase_encoding_steps,
+            NULLIF(TRIM(acquisition_matrix_pe::TEXT), '')::INTEGER AS acquisition_matrix_pe,
+            NULLIF(TRIM(recon_matrix_pe::TEXT), '')::INTEGER AS recon_matrix_pe,
+            NULLIF(
+                TRIM(parallel_reduction_factor_in_plane::TEXT),
+                ''
+            )::FLOAT AS parallel_reduction_factor_in_plane,
+            NULLIF(TRIM(pixel_bandwidth::TEXT), '')::FLOAT AS pixel_bandwidth,
+            NULLIF(TRIM(dwell_time::TEXT), '')::FLOAT AS dwell_time,
+            NULLIF(
+                TRIM(image_orientation_patient_dicom::TEXT),
+                ''
+            )::JSONB AS image_orientation_patient_dicom,
+            NULLIF(
+                TRIM(in_plane_phase_encoding_direction_dicom::TEXT),
+                ''
+            )::TEXT AS in_plane_phase_encoding_direction_dicom,
+            NULLIF(TRIM(bids_guess::TEXT), '')::JSONB AS bids_guess,
+            NULLIF(TRIM(conversion_software::TEXT), '')::TEXT AS conversion_software,
+            NULLIF(
+                TRIM(conversion_software_version::TEXT),
+                ''
+            )::TEXT AS conversion_software_version
+        FROM {{ source('raw', 'raw_nifti_metadata') }}
+    ),
+    {# 
+        Normalize and Distortion Correction:
+            NORM - Normalized Pixel
+            ND - Not distorted Pixel
+            DIS2D - Distorted Pixel and remapped
+        Inline-processing:
+            ND - Not Distortion Corrected
+            DIS2D - Distortion Correction 2D
+            DIS3D - Distortion Correction 3D
+    #}
+    create_flags AS (
+        SELECT
+            *,
+            image_type ? 'ORIGINAL' AS is_original_image,
+            image_type ? 'PRIMARY' AS is_primary_image,
+            image_type ? 'NORM' AS is_pixel_value_normalized,
+            image_type ? 'DIS3D' AS is_3d_distortion_corrected,
+            image_type ? 'DIS2D' AS is_2d_distortion_corrected,
+            image_type ? 'ND' AS is_not_distortion_corrected,
+            image_type ? 'MAGNITUDE' AS is_magnitude_image
+        FROM src
+    )
+
+SELECT
+    image_id,
+    cohort,
+    source_json_path,
+    modality,
+    ROUND(magnetic_field_strength, 1)::TEXT || 'T' AS magnetic_field_strength,
+    imaging_frequency,
+    manufacturer,
+    manufacturers_model_name,
+    institution_name,
+    device_serial_number,
+    body_part,
+    patient_position,
+    software_versions,
+    mr_acquisition_type,
+    study_description,
+    series_description,
+    protocol_name,
+    scanning_sequence,
+    sequence_variant,
+    scan_options,
+    sequence_name,
+    image_type,
+    nonlinear_gradient_correction,
+    series_number,
+    acquisition_time,
+    acquisition_number,
+    slice_thickness,
+    sar,
+    table_position,
+    echo_time,
+    repetition_time,
+    spoiling_state,
+    inversion_time,
+    flip_angle,
+    partial_fourier,
+    base_resolution,
+    shim_setting,
+    tx_ref_amp,
+    phase_resolution,
+    receive_coil_name,
+    receive_coil_active_elements,
+    pulse_sequence_details,
+    ref_lines_pe,
+    coil_combination_method,
+    consistency_info,
+    matrix_coil_mode,
+    percent_phase_fov,
+    percent_sampling,
+    phase_encoding_steps,
+    acquisition_matrix_pe,
+    recon_matrix_pe,
+    parallel_reduction_factor_in_plane,
+    pixel_bandwidth,
+    dwell_time,
+    image_orientation_patient_dicom,
+    in_plane_phase_encoding_direction_dicom,
+    bids_guess,
+    conversion_software,
+    conversion_software_version,
+    is_original_image,
+    is_primary_image,
+    is_pixel_value_normalized,
+    is_3d_distortion_corrected,
+    is_2d_distortion_corrected,
+    is_not_distortion_corrected,
+    is_magnitude_image
+FROM create_flags

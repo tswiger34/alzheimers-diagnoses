@@ -15,13 +15,10 @@ from sqlalchemy.dialects.postgresql import JSONB
 from mstat_project.utils import get_db_engine
 
 from .models import NiFTiMetadata
+from .utils import IMAGES_PATH, get_cohort_name, resolve_max_workers
 
 load_dotenv()
-COHORTS = list(range(1, 13))
-NIFTI_WORKERS_ENV_VAR = "NIFTI_WORKERS"
-DEFAULT_NIFTI_WORKERS = 16
-IMAGE_PATH = Path(os.getenv("IMAGE_PATH", "data/images"))
-NIFTI_IMAGE_PATH = IMAGE_PATH / "nifti"
+NIFTI_IMAGE_PATH = IMAGES_PATH / "nifti"
 RAW_NIFTI_METADATA_SCHEMA = "_raw"
 RAW_NIFTI_METADATA_TABLE = "raw_nifti_metadata"
 
@@ -37,33 +34,13 @@ class DicomFolderResult:
     error: str | None = None
 
 
-def _resolve_max_workers(max_workers: int | None = None) -> int:
-    """Resolve the configured worker count."""
-
-    if max_workers is None:
-        raw_max_workers = os.getenv(NIFTI_WORKERS_ENV_VAR, str(DEFAULT_NIFTI_WORKERS))
-        try:
-            max_workers = int(raw_max_workers)
-        except ValueError as exc:
-            msg = f"{NIFTI_WORKERS_ENV_VAR} must be an integer, got {raw_max_workers!r}"
-            raise ValueError(msg) from exc
-
-        max_workers = min(max_workers, os.cpu_count() or 1)
-
-    if max_workers < 1:
-        msg = f"max_workers must be at least 1, got {max_workers}"
-        raise ValueError(msg)
-
-    return max_workers
-
-
-def _has_existing_output(output_dir: Path) -> bool:
+def check_has_existing_output(output_dir: Path) -> bool:
     """Return True when an image output directory already contains generated files."""
 
     return output_dir.exists() and any(path.is_file() for path in output_dir.iterdir())
 
 
-def _find_selected_dicom_members(zip_path: Path, selected_ids: set[str]) -> dict[str, list[str]]:
+def find_selected_dicom_members(zip_path: Path) -> dict[str, list[str]]:
     """Map selected ADNI image IDs to DICOM member names in a cohort zip."""
 
     members_by_image_id: dict[str, list[str]] = {}
@@ -80,15 +57,13 @@ def _find_selected_dicom_members(zip_path: Path, selected_ids: set[str]) -> dict
             # Example:
             # ADNI/.../2025-04-09_09_12_52.0/I11193011/file.dcm
             image_id = member_path.parent.name.removeprefix("I")
-            if image_id not in selected_ids:
-                continue
 
             members_by_image_id.setdefault(image_id, []).append(member.filename)
 
     return members_by_image_id
 
 
-def _extract_dicom_members(zip_path: Path, member_names: list[str], output_dir: Path) -> None:
+def extract_dicom_members(zip_path: Path, member_names: list[str], output_dir: Path) -> None:
     """Extract a selected image folder's DICOM files from the cohort zip."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -98,36 +73,6 @@ def _extract_dicom_members(zip_path: Path, member_names: list[str], output_dir: 
             out_path = output_dir / Path(member_name).name
             with zf.open(member_name) as src, open(out_path, "wb") as dst:
                 shutil.copyfileobj(src, dst)
-
-
-def _raw_images_path() -> Path:
-    """Return the directory containing raw cohort zip files."""
-
-    return Path(os.getenv("IMAGES_PATH", "data/raw_images/raw"))
-
-
-def _cohort_name(cohort: int) -> str:
-    """Return the canonical cohort folder/archive stem."""
-
-    return f"cohort_{str(cohort).zfill(2)}"
-
-
-def _raw_cohort_zip_path(cohort: int) -> Path:
-    """Return the raw DICOM archive path for a cohort."""
-
-    return _raw_images_path() / f"{_cohort_name(cohort)}.zip"
-
-
-def _nifti_cohort_dir(cohort: int) -> Path:
-    """Return the temporary output directory for converted NIfTI files."""
-
-    return NIFTI_IMAGE_PATH / _cohort_name(cohort)
-
-
-def _nifti_cohort_zip_path(cohort: int) -> Path:
-    """Return the archived converted NIfTI path for a cohort."""
-
-    return NIFTI_IMAGE_PATH / f"{_cohort_name(cohort)}.zip"
 
 
 async def dicom_to_nifti_async(dicom_dir: str | Path, output_dir: str | Path) -> None:
@@ -174,7 +119,7 @@ async def process_dicom_folder_async(
     """Extract and convert one selected DICOM image folder."""
 
     image_output_dir = output_base_dir / image_id
-    if not overwrite and _has_existing_output(image_output_dir):
+    if not overwrite and check_has_existing_output(image_output_dir):
         print(f"Skipping {image_id}: output already exists")
         return DicomFolderResult(
             image_id=image_id,
@@ -186,7 +131,7 @@ async def process_dicom_folder_async(
     image_extract_dir = temp_base_dir / image_id
 
     try:
-        await asyncio.to_thread(_extract_dicom_members, zip_path, member_names, image_extract_dir)
+        await asyncio.to_thread(extract_dicom_members, zip_path, member_names, image_extract_dir)
         print(f"Converting {image_id}: {len(member_names)} DICOM files")
 
         await dicom_to_nifti_async(
@@ -209,30 +154,25 @@ async def process_dicom_folder_async(
             dicom_count=len(member_names),
             error=error,
         )
-    finally:
-        await asyncio.to_thread(shutil.rmtree, image_extract_dir, ignore_errors=True)
 
 
 async def process_cohort_async(
     cohort: int,
-    selected_ids: set[str],
     *,
     max_workers: int | None = None,
     overwrite: bool = False,
     archive: bool = True,
-) -> set[str]:
-    """Convert selected ADNI image IDs from a cohort zip to NIfTI asynchronously.
-
-    Only extracts DICOM files belonging to selected image folders.
-    """
+) -> None:
+    """Convert ADNI image IDs from a cohort zip to NIfTI asynchronously."""
 
     print(f"Processing Cohort: {cohort}")
 
-    zfile_path = _raw_cohort_zip_path(cohort)
-    output_base_dir = _nifti_cohort_dir(cohort)
-    worker_count = _resolve_max_workers(max_workers)
+    zfile_path = IMAGES_PATH / "raw" / f"{get_cohort_name(cohort)}.zip"
 
-    members_by_image_id = _find_selected_dicom_members(zfile_path, selected_ids)
+    output_base_dir = NIFTI_IMAGE_PATH / get_cohort_name(cohort)
+    worker_count = resolve_max_workers(max_workers)
+
+    members_by_image_id = find_selected_dicom_members(zfile_path)
     print(f"Found {len(members_by_image_id)} selected image folders in zip")
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -292,28 +232,7 @@ async def process_cohort_async(
         )
     if os.path.exists(output_base_dir) and not os.path.isfile(output_base_dir):
         await asyncio.to_thread(shutil.rmtree, path=output_base_dir)
-    return processed_ids
-
-
-def process_cohort(
-    cohort: int,
-    selected_ids: set[str],
-    *,
-    max_workers: int | None = None,
-    overwrite: bool = False,
-    archive: bool = True,
-) -> set[str]:
-    """Convert selected ADNI image IDs from a cohort zip to NIfTI."""
-
-    return asyncio.run(
-        process_cohort_async(
-            cohort=cohort,
-            selected_ids=selected_ids,
-            max_workers=max_workers,
-            overwrite=overwrite,
-            archive=archive,
-        )
-    )
+    return None
 
 
 def process_all(
@@ -322,24 +241,18 @@ def process_all(
     max_workers: int | None = None,
     overwrite: bool = False,
     archive: bool = True,
-) -> set[str]:
-
-    # Get selected image IDs
-    db_eng = get_db_engine()
-    with db_eng.connect() as conn:
-        result = conn.execute(statement=sqlalchemy.text(text="SELECT image_id FROM _core.core_image_set")).all()
-    ids = set(str(row[0]) for row in result)
+) -> None:
     for cohort in cohorts:
-        imgs_processed = process_cohort(
-            cohort,
-            selected_ids=ids,
-            max_workers=max_workers,
-            overwrite=overwrite,
-            archive=archive,
+        asyncio.run(
+            process_cohort_async(
+                cohort=cohort,
+                max_workers=max_workers,
+                overwrite=overwrite,
+                archive=archive,
+            )
         )
-        ids = ids - imgs_processed
 
-    return ids
+    return None
 
 
 def _unwrap_optional_annotation(annotation: Any) -> Any:
@@ -437,8 +350,8 @@ def get_metadata_record_from_json_text(
 ) -> dict[str, Any]:
     """Validate one metadata JSON archive member into a database record."""
 
-    metadata = NiFTiMetadata.model_validate_json(contents, strict=False)
-    record = metadata.model_dump(mode="json", include=set(NiFTiMetadata.model_fields))
+    metadata = NiFTiMetadata.model_validate_json(contents, strict=False, extra="allow")
+    record = metadata.model_dump(mode="json")
     return {
         "image_id": get_image_id_from_json_member(source_json_path),
         "cohort": cohort_str,
@@ -451,7 +364,7 @@ async def load_cohort_metadata_records(cohort: int) -> tuple[str, list[dict[str,
     """Extract and validate all metadata records from one converted cohort archive."""
 
     cohort_str = str(cohort).zfill(2)
-    zip_path = _nifti_cohort_zip_path(cohort)
+    zip_path = NIFTI_IMAGE_PATH / f"{get_cohort_name(cohort)}.zip"
 
     with zipfile.ZipFile(zip_path, mode="r") as zf:
         json_files = [
@@ -474,10 +387,11 @@ async def load_cohort_metadata_records(cohort: int) -> tuple[str, list[dict[str,
 
 async def load_cohort_metadata(cohort: int) -> None:
     cohort_str, records = await load_cohort_metadata_records(cohort)
+    print(records)
     await asyncio.to_thread(_replace_cohort_metadata, records, cohort_str)
 
 
-def load_all_metadata(cohorts: list[int] = COHORTS) -> None:
+def load_all_metadata(cohorts: list[int]) -> None:
     """Load raw NIfTI JSON metadata for all requested cohorts."""
 
     async def load_all() -> None:
@@ -487,14 +401,11 @@ def load_all_metadata(cohorts: list[int] = COHORTS) -> None:
     asyncio.run(load_all())
 
 
-def main(cohorts: list[int] = COHORTS) -> None:
-    ids = process_all(cohorts)
-    print(len(ids))
-    if len(ids) > 0:
-        print(ids)
-    load_all_metadata()
+def main(cohorts: list[int]) -> None:
+    # process_all(cohorts)
+    load_all_metadata(cohorts)
 
 
 if __name__ == "__main__":
-    # main()
-    load_all_metadata()
+    cohorts = list(range(1, 13))
+    main(cohorts)
