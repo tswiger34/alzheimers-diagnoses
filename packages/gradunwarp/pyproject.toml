@@ -1,0 +1,43 @@
+[project]
+name = "gradunwarp"
+version = "1.2.3"
+description = "HCP version of Gradient Unwarping Package for Python/Numpy"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+license-files = ["Copying.md"]
+authors = [
+    { name = "Human Connectome Project" },
+]
+classifiers = [
+    "Development Status :: 6 - Mature",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
+dependencies = [
+    "nibabel>=3.2.1",
+    "numpy",
+    "scipy",
+]
+
+[project.scripts]
+"gradient_unwarp.py" = "gradunwarp.gradient_unwarp:main"
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-cov",
+]
+
+
+[build-system]
+requires = ["uv_build>=0.11.19,<0.12"]
+build-backend = "uv_build"

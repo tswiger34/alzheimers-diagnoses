@@ -53,7 +53,7 @@ models:
         description: Download cohort for the converted NIfTI image metadata.
         data_tests:
           - not_null
-      - name: image_set_cohort
+      - name: processing_set_cohort
         data_type: INTEGER
         description: Approximately equally sized image cohort number assigned across the selected image set, from 1 to 10.
         data_tests:
@@ -87,7 +87,7 @@ models:
       - name: acquisition_number
         data_type: INTEGER
         description: DICOM acquisition number.
-      - name: mr_acquisition_type
+      - name: acquisition_type
         data_type: TEXT
         description: MRI acquisition type.
         data_tests:

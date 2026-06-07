@@ -3,7 +3,7 @@ name = "mstat-project"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 
 dependencies = [
     "aiocsv>=1.4.0",
@@ -15,18 +15,17 @@ dependencies = [
     "dbt-postgres>=1.10.0",
     "dcm2niix>=1.0.20260416",
     "ltsa",
+    "gradunwarp",
     "matplotlib>=3.10.9",
     "nibabel>=5.4.2",
-    "numpy>=2.4.2",
     "patito>=0.8.6",
     "plotly>=6.7.0",
     "polars>=1.38.1",
     "psycopg2-binary>=2.9.11",
     "pydantic>=2.12.5",
     "python-dotenv>=1.2.2",
+    "simpleitk>=2.5.5",
     "sqlalchemy>=2.0.49",
-    "torch>=2.10.0",
-    "torchvision>=0.25.0",
 ]
 
 [dependency-groups]
@@ -46,6 +45,7 @@ members = [
 
 [tool.uv.sources]
 ltsa = { workspace = true }
+gradunwarp  = { workspace = true }
 
 [tool.ty.src]
 

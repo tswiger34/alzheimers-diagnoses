@@ -16,6 +16,7 @@ WITH
             nifti.acquisition_number,
             nifti.slice_thickness,
             key_mri.study_phase,
+            key_mri.mri_manufacturer,
             key_mri.acquisition_type,
             key_mri.loni_image_id,
             key_mri.is_mprage,
@@ -41,30 +42,34 @@ WITH
     WHERE nifti.modality = 'MR' AND key_mri.acquisition_type = '3D'
     ),
 
+    get_correction_flag AS (
+        SELECT
+            *,
+            {# ADNI4 and ADNI3 are all gradient corrected, so we override the gradient correction flag for those studies #}
+            CASE
+                WHEN study_phase ILIKE 'A%4%' OR study_phase ILIKE 'A%3%' THEN TRUE
+                ELSE nonlinear_gradient_correction
+            END AS is_gradient_corrected
+        FROM src
+    ),
+
 
     get_ids AS (
         SELECT
             *,
-            CASE
-                WHEN study_phase ILIKE 'A%4%' OR study_phase ILIKE 'A%3%'
-                    THEN TRUE
-                WHEN is_pixel_value_normalized AND nonlinear_gradient_correction
-                    THEN TRUE
-            ELSE FALSE
-            END AS is_preprocessed,
             COUNT(*) OVER (PARTITION BY ptid) AS n_ptid_imgs,
             COUNT(*) OVER (PARTITION BY ptid, image_date) AS n_imgs_ptid_visit_date,
             ROW_NUMBER() OVER (
                 PARTITION BY ptid, image_date 
                 ORDER BY 
-                    nonlinear_gradient_correction DESC NULLS LAST, 
+                    is_gradient_corrected DESC NULLS LAST, 
                     is_mprage DESC NULLS LAST,
                     is_magnitude_image DESC NULLS LAST,
                     is_repeat DESC NULLS LAST, 
                     is_accelerated DESC NULLS LAST, 
                     magnetic_field_strength DESC NULLS LAST
                 ) AS ptid_visit_img_number
-        FROM src
+        FROM get_correction_flag
     )
 
 SELECT 
@@ -78,13 +83,14 @@ SELECT
     study_phase,
     image_type,
     series_type,
+    mri_manufacturer,
     modality,
     acquisition_time,
     acquisition_number,
     acquisition_type,
     slice_thickness,
     magnetic_field_strength,
-    nonlinear_gradient_correction,
+    is_gradient_corrected,
     is_mprage,
     is_mprage_repeat,
     is_repeat,
@@ -96,10 +102,9 @@ SELECT
     is_2d_distortion_corrected,
     is_not_distortion_corrected,
     is_magnitude_image,
-    is_preprocessed,
     ptid_visit_img_number,
     n_imgs_ptid_visit_date,
-    n_ptid_imgs,
+    n_ptid_imgs,           
     COALESCE(ptid_visit_img_number <> 1, FALSE) AS flag_for_drop
 FROM get_ids
 ORDER BY ptid, image_date, ptid_visit_img_number

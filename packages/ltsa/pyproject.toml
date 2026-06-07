@@ -12,12 +12,10 @@ classifiers = [
 readme = "README.md"
 license = "MIT"
 
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
-    "numpy>=2.4.2",
+    "numpy",
     "opencv-python>=4.13.0.92",
-    "torch>=2.10.0",
-    "torchvision>=0.25.0",
 ]
 
 [dependency-groups]

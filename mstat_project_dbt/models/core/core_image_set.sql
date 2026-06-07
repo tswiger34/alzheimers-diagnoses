@@ -11,13 +11,14 @@ WITH src AS (
         study_phase,
         image_type,
         series_type,
+        mri_manufacturer,
         modality,
         acquisition_time,
         acquisition_number,
         acquisition_type,
         slice_thickness,
         magnetic_field_strength,
-        nonlinear_gradient_correction,
+        is_gradient_corrected,
         is_mprage,
         is_mprage_repeat,
         is_repeat,
@@ -29,7 +30,6 @@ WITH src AS (
         is_2d_distortion_corrected,
         is_not_distortion_corrected,
         is_magnitude_image,
-        is_preprocessed,
         COUNT(*) OVER (PARTITION BY ptid) AS n_ptid_imgs,
         image_date - LAG(image_date) OVER (PARTITION BY ptid ORDER BY image_date) AS days_since_prior_image,
         image_date - MIN(image_date) OVER (PARTITION BY ptid) AS days_since_baseline_image
@@ -40,7 +40,7 @@ WITH src AS (
 image_set_cohorts AS (
     SELECT
         *,
-        NTILE(10) OVER (ORDER BY ptid, image_date, image_id) AS image_set_cohort
+        NTILE(10) OVER (ORDER BY ptid, image_date, image_id) AS processing_set_cohort
     FROM src
 )
 
