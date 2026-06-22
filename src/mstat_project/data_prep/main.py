@@ -14,6 +14,3 @@ Steps:
         - Intensity normalization
     5. Split into train/test/val and save model-ready tensors (./data/images/tensors/)
 """
-
-
-def process_images(): ...

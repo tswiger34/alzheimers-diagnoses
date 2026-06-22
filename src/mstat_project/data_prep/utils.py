@@ -10,15 +10,20 @@ def get_cohort_name(cohort: int) -> str:
     return f"cohort_{str(cohort).zfill(2)}"
 
 
-def resolve_max_workers(max_workers: int | None = None) -> int:
+def resolve_max_workers(
+    max_workers: int | None = None,
+    *,
+    env_var: str = "NIFTI_WORKERS",
+    default: int = 16,
+) -> int:
     """Resolve the configured worker count."""
 
     if max_workers is None:
-        raw_max_workers = os.getenv("NIFTI_WORKERS", str(16))
+        raw_max_workers = os.getenv(env_var, str(default))
         try:
             max_workers = int(raw_max_workers)
         except ValueError as exc:
-            msg = f"{'NIFTI_WORKERS'} must be an integer, got {raw_max_workers!r}"
+            msg = f"{env_var} must be an integer, got {raw_max_workers!r}"
             raise ValueError(msg) from exc
 
         max_workers = min(max_workers, os.cpu_count() or 1)

@@ -23,5 +23,7 @@
 	"python.testing.unittestEnabled": false,
 	"python.testing.pytestEnabled": true,
 	"python.terminal.useEnvFile": true,
-	"ty.inlayHints.variableTypes": false
+	"python.languageServer": "Pylance",
+	"ty.inlayHints.variableTypes": false,
+	"ty.disableLanguageServices": true
 }

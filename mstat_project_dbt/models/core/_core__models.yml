@@ -1,32 +1,27 @@
 version: 2
 
 models:
-  - name: core_image_set
+  - name: core_image_metadata
     description: |
-      The final set of MRI images used for analysis. This model filters the image metadata to records that are
-      not flagged for drop and returns one selected image per patient image date.
+      Joined MRI manifest, acquisition, and NIfTI metadata used to rank candidate images. Each row represents
+      an image, with image-type flags and selection metadata used to choose one image per patient and date.
 
     config:
       indexes:
         - type: btree
           unique: true
-          columns: [ptid_visit_date]
-        - type: btree
-          unique: true
           columns: [image_id]
         - type: btree
-          unique: true
           columns: [ptid, image_date]
 
     columns:
       - name: ptid_visit_date
         data_type: TEXT
         description: |
-          Unique identifier for each selected patient image date, created by concatenating the patient ID and
-          image date.
+          Patient/date identifier created by concatenating the patient ID and image date. Multiple candidate
+          images can share this value.
         data_tests:
           - not_null
-          - unique
       - name: image_id
         data_type: INTEGER
         description: Unique ADNI image identifier.
@@ -53,26 +48,21 @@ models:
         description: Download cohort for the converted NIfTI image metadata.
         data_tests:
           - not_null
-      - name: processing_set_cohort
-        data_type: INTEGER
-        description: Approximately equally sized image cohort number assigned across the selected image set, from 1 to 10.
-        data_tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       - name: protocol_name
         data_type: TEXT
         description: Acquisition protocol name from the NIfTI JSON sidecar.
-      - name: study_description
+      - name: study_phase
         data_type: TEXT
-        description: Study phase or study description associated with the image.
+        description: ADNI study phase in which the image was acquired.
       - name: image_type
         data_type: JSONB
         description: DICOM image type values from the NIfTI JSON sidecar.
       - name: series_type
         data_type: TEXT
         description: MRI series type or series description for the image.
+      - name: mri_manufacturer
+        data_type: TEXT
+        description: Manufacturer of the MRI scanner.
       - name: modality
         data_type: TEXT
         description: Imaging modality.
@@ -101,9 +91,9 @@ models:
       - name: magnetic_field_strength
         data_type: FLOAT
         description: Magnetic field strength of the scanner in Tesla.
-      - name: nonlinear_gradient_correction
+      - name: is_gradient_corrected
         data_type: BOOLEAN
-        description: Indicates whether nonlinear gradient correction was applied.
+        description: Indicates whether nonlinear gradient correction was applied or inferred from the ADNI phase.
       - name: is_mprage
         data_type: BOOLEAN
         description: Indicates whether the image is an MP-RAGE series.
@@ -116,14 +106,393 @@ models:
       - name: is_accelerated
         data_type: BOOLEAN
         description: Indicates whether the MRI acquisition was accelerated.
+      - name: is_original_image
+        data_type: BOOLEAN
+        description: Indicates whether the DICOM image type marks the image as original.
+      - name: is_primary_image
+        data_type: BOOLEAN
+        description: Indicates whether the DICOM image type marks the image as primary.
+      - name: is_pixel_value_normalized
+        data_type: BOOLEAN
+        description: Indicates whether pixel-value normalization was applied.
+      - name: is_3d_distortion_corrected
+        data_type: BOOLEAN
+        description: Indicates whether three-dimensional distortion correction was applied.
+      - name: is_2d_distortion_corrected
+        data_type: BOOLEAN
+        description: Indicates whether two-dimensional distortion correction was applied.
+      - name: is_not_distortion_corrected
+        data_type: BOOLEAN
+        description: Indicates whether the image is explicitly marked as not distortion corrected.
+      - name: is_magnitude_image
+        data_type: BOOLEAN
+        description: Indicates whether the DICOM image type marks the image as a magnitude image.
+      - name: ptid_visit_img_number
+        data_type: BIGINT
+        description: Candidate image rank within a patient/date, where 1 is the preferred image.
+        data_tests:
+          - not_null
+      - name: n_imgs_ptid_visit_date
+        data_type: BIGINT
+        description: Number of candidate images available for the patient on the image date.
+        data_tests:
+          - not_null
+      - name: n_ptid_imgs
+        data_type: BIGINT
+        description: Number of candidate images available for the patient across all dates.
+        data_tests:
+          - not_null
+      - name: flag_for_drop
+        data_type: BOOLEAN
+        description: Indicates that the image is not the preferred candidate for its patient/date.
+        data_tests:
+          - not_null
+
+  - name: core_image_set
+    description: |
+      Analysis-ready MRI image set containing the preferred image for each patient/date, longitudinal image
+      timing, processing cohorts, and the diagnosis interval applicable on the image date. Images acquired on
+      or after a patient's first AD diagnosis are excluded.
+
+    config:
+      indexes:
+        - type: btree
+          unique: true
+          columns: [ptid_visit_date]
+        - type: btree
+          unique: true
+          columns: [image_id]
+        - type: btree
+          unique: true
+          columns: [ptid, image_date]
+
+    columns:
+      - name: ptid_visit_date
+        data_type: TEXT
+        description: Unique patient/date identifier created by concatenating the patient ID and image date.
+        data_tests: [not_null, unique]
+      - name: image_id
+        data_type: INTEGER
+        description: Unique ADNI image identifier.
+        data_tests: [not_null, unique]
+      - name: ptid
+        data_type: TEXT
+        description: Patient identifier associated with the image.
+        data_tests: [not_null]
+      - name: image_date
+        data_type: DATE
+        description: Date the image was acquired.
+        data_tests: [not_null]
+      - name: visit_code
+        data_type: TEXT
+        description: Normalized ADNI visit code associated with the image.
+        data_tests: [not_null]
+      - name: cohort
+        data_type: TEXT
+        description: Download cohort assigned to the converted NIfTI image.
+        data_tests: [not_null]
+      - name: protocol_name
+        data_type: TEXT
+        description: Acquisition protocol name from the NIfTI metadata.
+      - name: study_phase
+        data_type: TEXT
+        description: ADNI study phase in which the image was acquired.
+      - name: image_type
+        data_type: JSONB
+        description: DICOM image-type values from the NIfTI metadata.
+      - name: series_type
+        data_type: TEXT
+        description: MRI series type or series description.
+      - name: mri_manufacturer
+        data_type: TEXT
+        description: Manufacturer of the MRI scanner.
+      - name: modality
+        data_type: TEXT
+        description: Imaging modality; this model contains MR images.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["MR"]
+      - name: acquisition_time
+        data_type: TIME
+        description: Time at which image acquisition began.
+      - name: acquisition_number
+        data_type: INTEGER
+        description: DICOM acquisition number.
+      - name: acquisition_type
+        data_type: TEXT
+        description: MRI acquisition dimensionality; this model contains 3D acquisitions.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["3D"]
+      - name: slice_thickness
+        data_type: FLOAT
+        description: Slice thickness in millimeters.
+      - name: magnetic_field_strength
+        data_type: FLOAT
+        description: Scanner magnetic-field strength in Tesla.
+      - name: is_gradient_corrected
+        data_type: BOOLEAN
+        description: Indicates whether nonlinear gradient correction was applied or inferred from the ADNI phase.
+      - name: is_mprage
+        data_type: BOOLEAN
+        description: Indicates whether the image is an MP-RAGE series.
+      - name: is_mprage_repeat
+        data_type: BOOLEAN
+        description: Indicates whether the image is an MP-RAGE repeat series.
+      - name: is_repeat
+        data_type: BOOLEAN
+        description: Indicates whether the image is a repeat series.
+      - name: is_accelerated
+        data_type: BOOLEAN
+        description: Indicates whether the MRI acquisition was accelerated.
+      - name: is_original_image
+        data_type: BOOLEAN
+        description: Indicates whether the DICOM image type marks the image as original.
+      - name: is_primary_image
+        data_type: BOOLEAN
+        description: Indicates whether the DICOM image type marks the image as primary.
+      - name: is_pixel_value_normalized
+        data_type: BOOLEAN
+        description: Indicates whether pixel-value normalization was applied.
+      - name: is_3d_distortion_corrected
+        data_type: BOOLEAN
+        description: Indicates whether three-dimensional distortion correction was applied.
+      - name: is_2d_distortion_corrected
+        data_type: BOOLEAN
+        description: Indicates whether two-dimensional distortion correction was applied.
+      - name: is_not_distortion_corrected
+        data_type: BOOLEAN
+        description: Indicates whether the image is explicitly marked as not distortion corrected.
+      - name: is_magnitude_image
+        data_type: BOOLEAN
+        description: Indicates whether the DICOM image type marks the image as a magnitude image.
       - name: n_ptid_imgs
         data_type: BIGINT
         description: Number of selected images available for the patient.
-        data_tests:
-          - not_null
+        data_tests: [not_null]
       - name: days_since_prior_image
         data_type: INTEGER
-        description: Number of days between this image date and the prior selected image date for the patient.
+        description: Number of days since the patient's preceding selected image; null for the first image.
       - name: days_since_baseline_image
         data_type: INTEGER
-        description: Number of days between this image date and the patient's first selected image date.
+        description: Number of days since the patient's first selected image.
+        data_tests: [not_null]
+      - name: processing_set_cohort
+        data_type: INTEGER
+        description: Approximately equal-sized processing cohort numbered from 1 through 10.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+      - name: ptid_img_number
+        data_type: BIGINT
+        description: Sequential selected-image number for the patient, ordered by image date and image ID.
+        data_tests: [not_null]
+      - name: months_since_prior_image
+        data_type: NUMERIC
+        description: Derived interval in months since the patient's preceding selected image; null for the first image.
+      - name: months_since_baseline_image
+        data_type: NUMERIC
+        description: Derived interval in months since the patient's first selected image.
+        data_tests: [not_null]
+      - name: diagnosis_code_at_visit
+        data_type: INTEGER
+        description: Diagnosis code applicable on the image date (1=CN, 2=MCI, 3=AD); null when no interval matches.
+      - name: diagnosis_at_visit
+        data_type: TEXT
+        description: Clinical diagnosis applicable on the image date (CN, MCI, or AD); null when no interval matches.
+      - name: dx_valid_from
+        data_type: DATE
+        description: Inclusive start date of the diagnosis interval matched to the image.
+      - name: dx_valid_to
+        data_type: DATE
+        description: Exclusive end date of the matched diagnosis interval; null for the latest interval.
+      - name: is_ad_at_visit
+        data_type: BOOLEAN
+        description: Indicates whether the diagnosis applicable on the image date is AD.
+      - name: baseline_diagnosis
+        data_type: TEXT
+        description: Diagnosis recorded at the patient's earliest diagnosis assessment.
+      - name: baseline_exam_date
+        data_type: DATE
+        description: Date of the patient's earliest diagnosis assessment.
+      - name: first_ad_diagnosis
+        data_type: DATE
+        description: Earliest AD diagnosis date observed for the patient as of the matched diagnosis interval.
+      - name: last_diagnosis
+        data_type: TEXT
+        description: Diagnosis recorded at the patient's latest diagnosis assessment.
+      - name: last_exam_date
+        data_type: DATE
+        description: Date of the patient's latest diagnosis assessment.
+      - name: time_to_ad_from_visit
+        data_type: INTEGER
+        description: Days from the matched diagnosis visit to the first observed AD diagnosis.
+      - name: time_to_ad_from_baseline
+        data_type: INTEGER
+        description: Days from the baseline diagnosis visit to the first observed AD diagnosis.
+      - name: is_ad_at_baseline
+        data_type: BOOLEAN
+        description: Indicates whether the patient's baseline diagnosis is AD.
+      - name: change_from_prior_visit
+        data_type: TEXT
+        description: Diagnosis transition from the diagnosis visit preceding the matched interval.
+      - name: change_from_prior_visit_code
+        data_type: TEXT
+        description: Direction of diagnosis-code change from the preceding diagnosis visit.
+      - name: change_from_baseline
+        data_type: TEXT
+        description: Stability or conversion label comparing the baseline and latest diagnoses.
+      - name: is_censored
+        data_type: BOOLEAN
+        description: Indicates that no AD diagnosis has been observed as of the matched diagnosis interval.
+      - name: is_conversion_from_baseline
+        data_type: BOOLEAN
+        description: Indicates whether the latest diagnosis differs from the baseline diagnosis.
+
+  - name: ptid_dx_transforms
+    description: |
+      Longitudinal diagnosis history for each patient. This model maps ADNI diagnosis codes to clinical labels,
+      orders visits by exam date, and derives baseline, prior-visit, conversion, and Alzheimer's disease timing
+      attributes for downstream analysis.
+
+    config:
+      indexes:
+        - type: btree
+          columns: [ptid, exam_date]
+
+    columns:
+      - name: ptid
+        data_type: TEXT
+        description: Patient identifier.
+        data_tests:
+          - not_null
+      - name: visit_code_normed
+        data_type: TEXT
+        description: Normalized ADNI visit code associated with the diagnosis assessment.
+        data_tests:
+          - not_null
+      - name: exam_date
+        data_type: DATE
+        description: Date of the diagnosis assessment.
+        data_tests:
+          - not_null
+      - name: diagnosis_code_at_visit
+        data_type: INTEGER
+        description: Diagnosis code at the visit (1=CN, 2=MCI, 3=AD).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3]
+      - name: diagnosis_at_visit
+        data_type: TEXT
+        description: Clinical diagnosis at the visit, mapped from the diagnosis code.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["CN", "MCI", "AD"]
+      - name: valid_from
+        data_type: DATE
+        description: Date from which the visit diagnosis is effective; equal to the exam date.
+        data_tests:
+          - not_null
+      - name: valid_to
+        data_type: DATE
+        description: Date of the patient's next diagnosis assessment; null for the latest visit.
+      - name: is_ad_at_visit
+        data_type: BOOLEAN
+        description: Indicates whether the diagnosis at the visit is AD.
+        data_tests:
+          - not_null
+      - name: visit_number
+        data_type: BIGINT
+        description: Sequential visit number for the patient, ordered by exam date beginning at 1.
+        data_tests:
+          - not_null
+      - name: baseline_diagnosis
+        data_type: TEXT
+        description: Diagnosis recorded at the patient's earliest assessment.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["CN", "MCI", "AD"]
+      - name: baseline_exam_date
+        data_type: DATE
+        description: Date of the patient's earliest diagnosis assessment.
+        data_tests:
+          - not_null
+      - name: first_ad_diagnosis
+        data_type: DATE
+        description: Earliest AD diagnosis date observed for the patient as of the current visit; null before AD is first diagnosed.
+      - name: last_diagnosis
+        data_type: TEXT
+        description: Diagnosis recorded at the patient's latest assessment.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["CN", "MCI", "AD"]
+      - name: last_exam_date
+        data_type: DATE
+        description: Date of the patient's latest diagnosis assessment.
+        data_tests:
+          - not_null
+      - name: n_visits
+        data_type: BIGINT
+        description: Total number of diagnosis visits available for the patient.
+        data_tests:
+          - not_null
+      - name: prior_diagnosis
+        data_type: TEXT
+        description: Diagnosis recorded at the patient's preceding visit; null for the baseline visit.
+      - name: prior_diagnosis_code
+        data_type: INTEGER
+        description: Diagnosis code recorded at the patient's preceding visit; null for the baseline visit.
+      - name: prior_exam_date
+        data_type: DATE
+        description: Date of the patient's preceding diagnosis assessment; null for the baseline visit.
+      - name: time_to_ad_from_visit
+        data_type: INTEGER
+        description: Number of days from the current visit to the patient's first observed AD diagnosis; null before AD is diagnosed.
+      - name: time_to_ad_from_baseline
+        data_type: INTEGER
+        description: Number of days from the baseline visit to the patient's first observed AD diagnosis; null before AD is diagnosed.
+      - name: is_ad_at_baseline
+        data_type: BOOLEAN
+        description: Indicates whether the patient's baseline diagnosis is AD.
+        data_tests:
+          - not_null
+      - name: change_from_prior_visit
+        data_type: TEXT
+        description: Diagnosis transition from the preceding visit, or a no-change label when diagnoses match; null at baseline.
+      - name: change_from_prior_visit_code
+        data_type: TEXT
+        description: Direction of diagnosis-code change from the preceding visit (Worsened, Improved, or No Change).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["Worsened", "Improved", "No Change"]
+      - name: change_from_baseline
+        data_type: TEXT
+        description: Patient-level label describing stability or conversion between the baseline and latest diagnoses.
+        data_tests:
+          - not_null
+      - name: is_censored
+        data_type: BOOLEAN
+        description: Indicates that no AD diagnosis has been observed for the patient as of the current visit.
+        data_tests:
+          - not_null
+      - name: is_conversion_from_baseline
+        data_type: BOOLEAN
+        description: Indicates whether the latest diagnosis differs from the baseline diagnosis.
+        data_tests:
+          - not_null

@@ -8,8 +8,10 @@ For each `output_cohort`:
 3. Zip `output_temp_dir` --> {IMAGE_PATH}/preprocessed/{output_cohort}
 """
 
+import datetime
 import shutil
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from zipfile import ZipFile
@@ -19,12 +21,12 @@ import sqlalchemy
 
 from mstat_project.utils import get_db_engine
 
-from .utils import IMAGES_PATH, get_cohort_name
+from .utils import IMAGES_PATH, get_cohort_name, resolve_max_workers
 
 NIFTI_INPUT_PATH = IMAGES_PATH / "nifti"
 PREPROCESSED_IMAGE_PATH = IMAGES_PATH / "preprocessed"
 INPUT_COHORTS: list[str] = list(get_cohort_name(i) for i in range(1, 13))
-OUTPUT_COHORTS: list[int] = list(range(1, 11))
+OUTPUT_COHORTS: list[int] = list(range(8, 11))
 
 
 @dataclass
@@ -223,7 +225,19 @@ def perform_n4_bias_correction(input_image_path: str | Path, output_image_path: 
     sitk.WriteImage(corrected, str(output_image_path))
 
 
-def preprocess_images_for_output_cohort(output_cohort: int) -> None:
+@dataclass(frozen=True)
+class N4BiasCorrectionTask:
+    image_id: str
+    input_image_path: Path
+    output_image_path: Path
+
+
+def run_n4_bias_correction_task(task: N4BiasCorrectionTask) -> str:
+    perform_n4_bias_correction(task.input_image_path, task.output_image_path)
+    return task.image_id
+
+
+def preprocess_images_for_output_cohort(output_cohort: int, *, n4_workers: int | None = None) -> None:
 
     image_list = get_image_list(output_cohort)
     if not image_list:
@@ -246,18 +260,42 @@ def preprocess_images_for_output_cohort(output_cohort: int) -> None:
             )
 
         total_images = len(image_list)
-        print(f"Starting N4 bias correction for {total_images} images in output cohort {output_cohort}")
-        for completed_count, image_metadata in enumerate(image_list, start=1):
-            n4_input_path = image_metadata.get_staged_input_image_path(staging_temp_dir)
-            output_path = image_metadata.get_output_image_path(output_temp_dir)
-            perform_n4_bias_correction(n4_input_path, output_path)
-            if completed_count % 50 == 0:
-                print(
-                    f"Completed N4 bias correction for {completed_count}/{total_images} "
-                    f"images in output cohort {output_cohort}"
-                )
+        worker_count = resolve_max_workers(n4_workers, env_var="N4_WORKERS", default=4)
+        n4_tasks = [
+            N4BiasCorrectionTask(
+                image_id=image_metadata.image_id,
+                input_image_path=image_metadata.get_staged_input_image_path(staging_temp_dir),
+                output_image_path=image_metadata.get_output_image_path(output_temp_dir),
+            )
+            for image_metadata in image_list
+        ]
+        print(
+            f"Starting N4 bias correction for {total_images} images in output cohort {output_cohort} "
+            f"with {worker_count} workers - {datetime.datetime.now().isoformat()}"
+        )
 
-        print(f"Completed N4 bias correction for {total_images}/{total_images} images in output cohort {output_cohort}")
+        failed_image_ids: list[str] = []
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures_by_image_id = {
+                executor.submit(run_n4_bias_correction_task, task): task.image_id for task in n4_tasks
+            }
+            for completed_count, future in enumerate(as_completed(futures_by_image_id), start=1):
+                image_id = futures_by_image_id[future]
+                try:
+                    future.result()
+                except Exception as exc:
+                    failed_image_ids.append(image_id)
+                    print(f"Failed N4 bias correction for image {image_id}: {exc}")
+
+                if completed_count % 50 == 0 or completed_count == total_images:
+                    print(
+                        f"Finished N4 bias correction tasks for {completed_count}/{total_images} "
+                        f"images in output cohort {output_cohort} - {datetime.datetime.now().isoformat()}"
+                    )
+
+        if failed_image_ids:
+            failed_ids = ", ".join(failed_image_ids)
+            raise RuntimeError(f"N4 bias correction failed for {len(failed_image_ids)} images: {failed_ids}")
 
         shutil.make_archive(
             base_name=str(archive_base_path),
@@ -267,10 +305,10 @@ def preprocess_images_for_output_cohort(output_cohort: int) -> None:
         print(f"Wrote preprocessed archive to {archive_base_path}.zip")
 
 
-def main(output_cohorts: list[int]) -> None:
+def main(output_cohorts: list[int], *, n4_workers: int | None = None) -> None:
     for output_cohort in output_cohorts:
-        preprocess_images_for_output_cohort(output_cohort)
+        preprocess_images_for_output_cohort(output_cohort, n4_workers=n4_workers)
 
 
 if __name__ == "__main__":
-    main([1])
+    main(output_cohorts=OUTPUT_COHORTS, n4_workers=4)
