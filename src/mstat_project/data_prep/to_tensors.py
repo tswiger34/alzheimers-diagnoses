@@ -16,7 +16,7 @@ INPUT_PATH = IMAGE_PATH / "preprocessed"
 TENSOR_OUTPUT = IMAGE_PATH / "tensors"
 
 
-def nifti_to_tensor(input_path: str | Path) -> None:
+def nifti_to_tensor(input_path: str | Path) -> torch.Tensor:
     """Convert a T1 NIfTI image into a standardized 182x218x182 FP32 tensor."""
 
     subject = tio.Subject(t1=tio.ScalarImage(str(input_path)))
@@ -43,16 +43,45 @@ def nifti_to_tensor(input_path: str | Path) -> None:
     return tensor
 
 
-def get_subject_metadata(subject_id: str) -> ADNISubjectTensorDictMin:
+def get_subject_metadata(subject_id: str, subjects_df: pl.DataFrame) -> ADNISubjectTensorDictMin:
     """Get the subject metadata from the database.
 
     Args:
         subject_id (str): The ADNI ID of the subject
+        subjects_df (pl.DataFrame): DataFrame containing all subjects' metadata
 
     Returns:
         ADNISubjectTensorDictMin: The subject metadata
     """
-    ...  # Implementation goes here
+    subject_df = subjects_df.filter(pl.col("ptid") == subject_id)
+
+    if subject_df.is_empty():
+        raise ValueError(f"Subject {subject_id} not found in the database.")
+
+    subject_metadata: ADNISubjectTensorDictMin = {
+        "ptid": subject_id,
+        "img_ids": subject_df["image_id"].to_list(),
+        "images": None,
+        "months_since_prior_mri": torch.tensor(
+            subject_df["months_since_prior_image"].to_list(), dtype=torch.float32
+        ),
+        "months_since_baseline_mri": torch.tensor(
+            subject_df["months_since_baseline_image"].to_list(), dtype=torch.float32
+        ),
+        "time_to_event": torch.tensor(subject_df["time_to_ad_from_image"].to_list()[0], dtype=torch.float32),
+        "dx_code_at_visit": torch.tensor(subject_df["diagnosis_code_at_visit"].to_list(), dtype=torch.int16),
+        "age_at_baseline": torch.tensor(subject_df["age_at_baseline"].to_list()[0], dtype=torch.float32),
+    }
+
+    return subject_metadata
+
+
+def get_subject_images(subject_metadata: ADNISubjectTensorDictMin):
+    input_paths = [
+        INPUT_PATH / f"{subject_metadata['ptid']}/{img_id}.nii.gz" for img_id in subject_metadata["img_ids"]
+    ]
+    img_tensors = [nifti_to_tensor(input_path) for input_path in input_paths]
+    return img_tensors
 
 
 def get_output_path(subject_id: str, visit_num: int, img_id: str) -> Path:
@@ -72,36 +101,26 @@ def get_output_path(subject_id: str, visit_num: int, img_id: str) -> Path:
     return TENSOR_OUTPUT / rel_path
 
 
-def process_img(): ...
-
-
-def process_cohort(cohort: int): ...
-
-
 def main():
     eng = get_db_engine()
     with eng.connect() as conn:
         subjects_df = pl.read_database(
             query="""
             SELECT
-                ptid_visit_date,
                 image_id,
                 ptid,
-                processing_set_cohort,
                 image_date,
+                processing_set_cohort,
                 visit_code,
+                diagnosis_code_at_visit,
                 months_since_prior_image,
                 months_since_baseline_image,
                 age_at_baseline,
-                age_at_image,
-                first_ad_diagnosis,
-                observed_time_months,
-                time_to_ad_from_baseline,
-                time_to_ad_from_visit,
-                dx.is_censored,
-                last_diagnosis,
-                is_ad_at_visit
+                time_to_ad_from_image,
+                is_censored,
+                ptid_img_number
             FROM _core.core_image_set
+            ORDER BY ptid, image_date, ptid_img_number
             """,
             connection=conn,
         )

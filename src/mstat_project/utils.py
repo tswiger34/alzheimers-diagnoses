@@ -88,10 +88,10 @@ class ADNISubjectTensorDictMin(TypedDict):
             dimension is 1. If using multiple modalities, this structure should
             be updated to allow more channels.
 
-        months_since_previous_mri: Time gap in months from the previous MRI.
+        months_since_prior_mri: Time gap in months from the previous MRI.
             The first visit should usually be 0. Shape: ``(n_visits,)``.
 
-        months_since_baseline: Time gap in months from the baseline MRI.
+        months_since_baseline_mri: Time gap in months from the baseline MRI.
             Shape: ``(n_visits,)``.
 
         time_to_event: Scalar time to event or censoring, measured in
@@ -105,9 +105,9 @@ class ADNISubjectTensorDictMin(TypedDict):
 
     ptid: str
     img_ids: list[str]
-    images: MRISequenceTensor
-    months_since_previous_mri: VisitFloatTensor
-    months_since_baseline: VisitFloatTensor
+    images: MRISequenceTensor | None
+    months_since_prior_mri: VisitFloatTensor
+    months_since_baseline_mri: VisitFloatTensor
     time_to_event: ScalarFloatTensor
     dx_code_at_visit: VisitLongTensor
     age_at_baseline: ScalarFloatTensor
@@ -132,10 +132,10 @@ class ADNISubjectTensorDictFull(TypedDict):
             dimension is 1. If using multiple modalities, this structure should
             be updated to allow more channels.
 
-        months_since_baseline: Visit time in months from the participant's
+        months_since_baseline_mri: Visit time in months from the participant's
             baseline visit. Shape: ``(n_visits,)``.
 
-        months_since_previous_mri: Time gap in months from the previous MRI.
+        months_since_prior_mri: Time gap in months from the previous MRI.
             The first visit should usually be 0. Shape: ``(n_visits,)``.
 
         age_at_visit: Participant age at each MRI visit. Shape:
@@ -183,8 +183,8 @@ class ADNISubjectTensorDictFull(TypedDict):
     ptid: str
     image: MRISequenceTensor
 
-    months_since_baseline: VisitFloatTensor
-    months_since_previous_mri: VisitFloatTensor
+    months_since_baseline_mri: VisitFloatTensor
+    months_since_prior_mri: VisitFloatTensor
     age_at_visit: VisitFloatTensor
     visit_mask: VisitBoolTensor
 
