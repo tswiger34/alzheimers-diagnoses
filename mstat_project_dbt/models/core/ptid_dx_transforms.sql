@@ -30,21 +30,20 @@ t1 AS (
         ROW_NUMBER() OVER (PARTITION BY ptid ORDER BY exam_date) AS visit_number,
         FIRST_VALUE(diagnosis_at_visit) OVER (PARTITION BY ptid ORDER BY exam_date) AS baseline_diagnosis,
         FIRST_VALUE(exam_date) OVER (PARTITION BY ptid ORDER BY exam_date) AS baseline_exam_date,
-        MIN(exam_date) FILTER (WHERE diagnosis_at_visit = 'AD') OVER (PARTITION BY ptid ORDER BY exam_date) AS first_ad_diagnosis,
+        MIN(exam_date) FILTER (WHERE diagnosis_at_visit = 'AD') OVER (PARTITION BY ptid ORDER BY exam_date ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS first_ad_diagnosis,
         LAST_VALUE(diagnosis_at_visit) OVER (
-            PARTITION BY ptid 
+            PARTITION BY ptid
             ORDER BY exam_date ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-        ) AS last_diagnosis,
+        ) AS final_diagnosis,
         LAST_VALUE(exam_date) OVER (
-            PARTITION BY ptid 
+            PARTITION BY ptid
             ORDER BY exam_date ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-        ) AS last_exam_date,
+        ) AS final_exam_date,
         COUNT(*) OVER (PARTITION BY ptid) AS n_visits,
         LAG(diagnosis_at_visit) OVER (PARTITION BY ptid ORDER BY exam_date) AS prior_diagnosis,
         LAG(diagnosis_code_at_visit) OVER (PARTITION BY ptid ORDER BY exam_date) AS prior_diagnosis_code,
         LAG(exam_date) OVER (PARTITION BY ptid ORDER BY exam_date) AS prior_exam_date
     FROM src
-    WHERE diagnosis_at_visit IS NOT NULL    
 ),
 
 t2 AS (
@@ -62,9 +61,9 @@ t2 AS (
             WHEN diagnosis_code_at_visit < prior_diagnosis_code THEN 'Improved'
             ELSE 'No Change'
         END AS change_from_prior_visit_code,
-        CASE 
-            WHEN last_diagnosis = baseline_diagnosis THEN 'Stable' || ' - ' || baseline_diagnosis
-            ELSE 'Conversion' || ' - ' || baseline_diagnosis || ' to ' || last_diagnosis
+        CASE
+            WHEN final_diagnosis = baseline_diagnosis THEN 'Stable' || ' - ' || baseline_diagnosis
+            ELSE 'Conversion' || ' - ' || baseline_diagnosis || ' to ' || final_diagnosis
         END AS change_from_baseline,
         COALESCE(first_ad_diagnosis IS NULL, FALSE) AS is_censored
     FROM t1
@@ -75,4 +74,4 @@ SELECT
     *,
     COALESCE(change_from_baseline ILIKE 'Conversion%', FALSE) AS is_conversion_from_baseline
 FROM t2
-ORDER BY ptid, exam_date
+ORDER BY ptid, visit_number

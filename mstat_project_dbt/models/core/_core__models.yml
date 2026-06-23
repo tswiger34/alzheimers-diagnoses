@@ -151,14 +151,12 @@ models:
   - name: core_image_set
     description: |
       Analysis-ready MRI image set containing the preferred image for each patient/date, longitudinal image
-      timing, processing cohorts, and the diagnosis interval applicable on the image date. Images acquired on
-      or after a patient's first AD diagnosis are excluded.
+      timing, processing cohorts, demographics, and the diagnosis interval applicable on the image date.
+      Patients whose first selected image is associated with an AD diagnosis and images without an applicable
+      diagnosis are excluded, as are images after the first selected image associated with AD.
 
     config:
       indexes:
-        - type: btree
-          unique: true
-          columns: [ptid_visit_date]
         - type: btree
           unique: true
           columns: [image_id]
@@ -293,67 +291,108 @@ models:
         data_type: BIGINT
         description: Sequential selected-image number for the patient, ordered by image date and image ID.
         data_tests: [not_null]
-      - name: months_since_prior_image
-        data_type: NUMERIC
-        description: Derived interval in months since the patient's preceding selected image; null for the first image.
-      - name: months_since_baseline_image
-        data_type: NUMERIC
-        description: Derived interval in months since the patient's first selected image.
-        data_tests: [not_null]
       - name: diagnosis_code_at_visit
         data_type: INTEGER
-        description: Diagnosis code applicable on the image date (1=CN, 2=MCI, 3=AD); null when no interval matches.
+        description: Diagnosis code applicable on the image date (1=CN, 2=MCI, 3=AD).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3]
       - name: diagnosis_at_visit
         data_type: TEXT
-        description: Clinical diagnosis applicable on the image date (CN, MCI, or AD); null when no interval matches.
+        description: Clinical diagnosis applicable on the image date (CN, MCI, or AD).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["CN", "MCI", "AD"]
       - name: dx_valid_from
         data_type: DATE
         description: Inclusive start date of the diagnosis interval matched to the image.
+        data_tests: [not_null]
       - name: dx_valid_to
         data_type: DATE
         description: Exclusive end date of the matched diagnosis interval; null for the latest interval.
       - name: is_ad_at_visit
         data_type: BOOLEAN
         description: Indicates whether the diagnosis applicable on the image date is AD.
+        data_tests: [not_null]
+      - name: prior_diagnosis
+        data_type: TEXT
+        description: Diagnosis associated with the patient's preceding selected image; null for the first image.
+      - name: prior_diagnosis_code
+        data_type: INTEGER
+        description: Diagnosis code associated with the patient's preceding selected image; null for the first image.
       - name: baseline_diagnosis
         data_type: TEXT
-        description: Diagnosis recorded at the patient's earliest diagnosis assessment.
-      - name: baseline_exam_date
+        description: Diagnosis associated with the patient's earliest selected image.
+        data_tests: [not_null]
+      - name: baseline_image_date
         data_type: DATE
-        description: Date of the patient's earliest diagnosis assessment.
+        description: Date of the patient's earliest selected image.
+        data_tests: [not_null]
       - name: first_ad_diagnosis
         data_type: DATE
-        description: Earliest AD diagnosis date observed for the patient as of the matched diagnosis interval.
-      - name: last_diagnosis
+        description: Date of the patient's earliest selected image associated with an AD diagnosis; null if none exists.
+      - name: final_diagnosis
         data_type: TEXT
-        description: Diagnosis recorded at the patient's latest diagnosis assessment.
-      - name: last_exam_date
+        description: Diagnosis associated with the patient's latest selected image.
+        data_tests: [not_null]
+      - name: final_image_date
         data_type: DATE
-        description: Date of the patient's latest diagnosis assessment.
-      - name: time_to_ad_from_visit
+        description: Date of the patient's latest selected image.
+        data_tests: [not_null]
+      - name: time_to_ad_from_image
         data_type: INTEGER
-        description: Days from the matched diagnosis visit to the first observed AD diagnosis.
+        description: Days from the current image to the earliest selected image associated with AD; null if none exists.
       - name: time_to_ad_from_baseline
         data_type: INTEGER
-        description: Days from the baseline diagnosis visit to the first observed AD diagnosis.
+        description: Days from the baseline image to the earliest selected image associated with AD; null if none exists.
       - name: is_ad_at_baseline
         data_type: BOOLEAN
-        description: Indicates whether the patient's baseline diagnosis is AD.
+        description: Indicates whether the diagnosis associated with the patient's baseline image is AD.
+        data_tests: [not_null]
       - name: change_from_prior_visit
         data_type: TEXT
-        description: Diagnosis transition from the diagnosis visit preceding the matched interval.
+        description: Diagnosis transition from the preceding selected image; null for the first image.
       - name: change_from_prior_visit_code
         data_type: TEXT
-        description: Direction of diagnosis-code change from the preceding diagnosis visit.
+        description: Direction of diagnosis-code change from the preceding selected image; No Change for the first image.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["Worsened", "Improved", "No Change"]
       - name: change_from_baseline
         data_type: TEXT
-        description: Stability or conversion label comparing the baseline and latest diagnoses.
+        description: Patient-level stability or conversion label comparing diagnoses on the baseline and latest images.
+        data_tests: [not_null]
       - name: is_censored
         data_type: BOOLEAN
-        description: Indicates that no AD diagnosis has been observed as of the matched diagnosis interval.
-      - name: is_conversion_from_baseline
-        data_type: BOOLEAN
-        description: Indicates whether the latest diagnosis differs from the baseline diagnosis.
+        description: Indicates that no selected image for the patient is associated with an AD diagnosis.
+        data_tests: [not_null]
+      - name: pt_birth_date
+        data_type: DATE
+        description: Patient birth date, represented as the first day of the recorded birth month.
+      - name: pt_marital_status
+        data_type: INTEGER
+        description: Patient marital-status code recorded in the baseline demographic record.
+      - name: pt_education_years
+        data_type: INTEGER
+        description: Patient years of education recorded in the baseline demographic record.
+      - name: age_at_baseline
+        data_type: NUMERIC
+        description: Patient age in completed years on the baseline image date.
+      - name: age_at_image
+        data_type: NUMERIC
+        description: Patient age in completed years on the current image date.
+      - name: months_to_ad_from_image
+        data_type: NUMERIC(5,2)
+        description: Approximate months from the current image to the earliest selected image associated with AD.
+      - name: months_to_ad_from_baseline
+        data_type: NUMERIC(5,2)
+        description: Approximate months from the baseline image to the earliest selected image associated with AD.
 
   - name: ptid_dx_transforms
     description: |
@@ -384,17 +423,15 @@ models:
           - not_null
       - name: diagnosis_code_at_visit
         data_type: INTEGER
-        description: Diagnosis code at the visit (1=CN, 2=MCI, 3=AD).
+        description: Diagnosis code at the visit (1=CN, 2=MCI, 3=AD); null when the source diagnosis is missing or unmapped.
         data_tests:
-          - not_null
           - accepted_values:
               arguments:
                 values: [1, 2, 3]
       - name: diagnosis_at_visit
         data_type: TEXT
-        description: Clinical diagnosis at the visit, mapped from the diagnosis code.
+        description: Clinical diagnosis at the visit, mapped from the diagnosis code; null when the code is missing or unmapped.
         data_tests:
-          - not_null
           - accepted_values:
               arguments:
                 values: ["CN", "MCI", "AD"]
@@ -418,9 +455,8 @@ models:
           - not_null
       - name: baseline_diagnosis
         data_type: TEXT
-        description: Diagnosis recorded at the patient's earliest assessment.
+        description: Diagnosis recorded at the patient's earliest assessment; may be null when that diagnosis is missing or unmapped.
         data_tests:
-          - not_null
           - accepted_values:
               arguments:
                 values: ["CN", "MCI", "AD"]
@@ -431,16 +467,15 @@ models:
           - not_null
       - name: first_ad_diagnosis
         data_type: DATE
-        description: Earliest AD diagnosis date observed for the patient as of the current visit; null before AD is first diagnosed.
-      - name: last_diagnosis
+        description: Earliest AD diagnosis date observed across all of the patient's visits; null if AD is never diagnosed.
+      - name: final_diagnosis
         data_type: TEXT
-        description: Diagnosis recorded at the patient's latest assessment.
+        description: Diagnosis recorded at the patient's latest assessment; may be null when that diagnosis is missing or unmapped.
         data_tests:
-          - not_null
           - accepted_values:
               arguments:
                 values: ["CN", "MCI", "AD"]
-      - name: last_exam_date
+      - name: final_exam_date
         data_type: DATE
         description: Date of the patient's latest diagnosis assessment.
         data_tests:
@@ -461,10 +496,10 @@ models:
         description: Date of the patient's preceding diagnosis assessment; null for the baseline visit.
       - name: time_to_ad_from_visit
         data_type: INTEGER
-        description: Number of days from the current visit to the patient's first observed AD diagnosis; null before AD is diagnosed.
+        description: Number of days from the current visit to the patient's first observed AD diagnosis; negative after that diagnosis and null if AD is never diagnosed.
       - name: time_to_ad_from_baseline
         data_type: INTEGER
-        description: Number of days from the baseline visit to the patient's first observed AD diagnosis; null before AD is diagnosed.
+        description: Number of days from the baseline visit to the patient's first observed AD diagnosis; null if AD is never diagnosed.
       - name: is_ad_at_baseline
         data_type: BOOLEAN
         description: Indicates whether the patient's baseline diagnosis is AD.
@@ -483,12 +518,10 @@ models:
                 values: ["Worsened", "Improved", "No Change"]
       - name: change_from_baseline
         data_type: TEXT
-        description: Patient-level label describing stability or conversion between the baseline and latest diagnoses.
-        data_tests:
-          - not_null
+        description: Patient-level label describing stability or conversion between the baseline and latest diagnoses; null if either diagnosis is null.
       - name: is_censored
         data_type: BOOLEAN
-        description: Indicates that no AD diagnosis has been observed for the patient as of the current visit.
+        description: Indicates that no AD diagnosis has been observed across any of the patient's visits.
         data_tests:
           - not_null
       - name: is_conversion_from_baseline
