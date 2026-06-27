@@ -98,8 +98,9 @@ derive_dx_visit_info AS (
 derive_time_to_event_info AS (
     SELECT
         *,
-        first_ad_diagnosis - image_date AS time_to_ad_from_image,
-        first_ad_diagnosis - baseline_image_date AS time_to_ad_from_baseline,
+        COALESCE(first_ad_diagnosis, final_image_date) - image_date AS time_to_ad_from_image,
+
+        COALESCE(first_ad_diagnosis, final_image_date) - baseline_image_date AS time_to_ad_from_baseline,
         COALESCE(baseline_diagnosis = 'AD', FALSE) AS is_ad_at_baseline,
         CASE
             WHEN diagnosis_at_visit = prior_diagnosis THEN 'No Change' || ' - ' || diagnosis_at_visit
@@ -114,7 +115,11 @@ derive_time_to_event_info AS (
             WHEN final_diagnosis = baseline_diagnosis THEN 'Stable' || ' - ' || baseline_diagnosis
             ELSE 'Conversion' || ' - ' || baseline_diagnosis || ' to ' || final_diagnosis
         END AS change_from_baseline,
-        COALESCE(first_ad_diagnosis IS NULL, FALSE) AS is_censored
+        COALESCE(first_ad_diagnosis IS NULL, FALSE) AS is_censored,
+        COALESCE(
+            (diagnosis_at_visit <> 'AD' AND (COALESCE(first_ad_diagnosis, final_image_date) - image_date) > 0) 
+            OR first_ad_diagnosis IS NULL, FALSE
+        ) AS mri_is_valid
     FROM derive_dx_visit_info
 ),
 
@@ -133,7 +138,70 @@ get_ptid_info AS (
         ON derive_time_to_event_info.ptid = pt.ptid
 )
 
-SELECT *
+SELECT
+    ptid_visit_date,
+        image_id,
+        ptid,
+        image_date,
+        visit_code,
+        cohort,
+        protocol_name,
+        study_phase,
+        image_type,
+        series_type,
+        mri_manufacturer,
+        modality,
+        acquisition_time,
+        acquisition_number,
+        acquisition_type,
+        slice_thickness,
+        magnetic_field_strength,
+        is_gradient_corrected,
+        is_mprage,
+        is_mprage_repeat,
+        is_repeat,
+        is_accelerated,
+        is_original_image,
+        is_primary_image,
+        is_pixel_value_normalized,
+        is_3d_distortion_corrected,
+        is_2d_distortion_corrected,
+        is_not_distortion_corrected,
+        is_magnitude_image,
+        n_ptid_imgs,
+        COALESCE(days_since_prior_image, 0) AS days_since_prior_image,
+        days_since_baseline_image,
+        processing_set_cohort,
+        ptid_img_number,
+        diagnosis_code_at_visit,
+        diagnosis_at_visit,
+        dx_valid_from,
+        dx_valid_to,
+        is_ad_at_visit,
+        months_since_baseline_image,
+        COALESCE(months_since_prior_image, 0) AS months_since_prior_image,
+        prior_diagnosis,
+        prior_diagnosis_code,
+        baseline_diagnosis,
+        baseline_image_date,
+        first_ad_diagnosis,
+        final_diagnosis,
+        final_image_date,
+        time_to_ad_from_image,
+        time_to_ad_from_baseline,
+        is_ad_at_baseline,
+        change_from_prior_visit,
+        change_from_prior_visit_code,
+        change_from_baseline,
+        is_censored,
+        mri_is_valid,
+        pt_birth_date,
+        pt_marital_status,
+        pt_education_years,
+        age_at_baseline,
+        age_at_image,
+        months_to_ad_from_image,
+        months_to_ad_from_baseline
 FROM get_ptid_info
 WHERE
     NOT is_ad_at_baseline

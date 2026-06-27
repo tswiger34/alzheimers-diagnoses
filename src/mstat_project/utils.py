@@ -50,7 +50,7 @@ VisitBoolTensor: TypeAlias = Annotated[
 VisitLongTensor: TypeAlias = Annotated[
     torch.Tensor,
     "shape: (n_visits,)",
-    "dtype: torch.int16",
+    "dtype: torch.int64",
 ]
 
 ScalarFloatTensor: TypeAlias = Annotated[
@@ -68,7 +68,7 @@ ScalarBoolTensor: TypeAlias = Annotated[
 ScalarLongTensor: TypeAlias = Annotated[
     torch.Tensor,
     "shape: ()",
-    "dtype: torch.int16",
+    "dtype: torch.int64",
 ]
 
 
@@ -79,28 +79,36 @@ class ADNISubjectTensorDictMin(TypedDict):
     and their MRI scans. It is used for indexing and retrieving subject data.
 
     Attributes:
-        ptid: ADNI participant identifier.
+        ptid (str): ADNI participant identifier.
 
-        img_ids: List of scan identifiers for the subject's MRI scans.
+        img_ids (list[str]): List of scan identifiers for the subject's MRI scans.
 
-        images: Chronologically ordered MRI sequence with shape
+        images (MRISequenceTensor | None): Chronologically ordered MRI sequence with shape
             ``(n_visits, 1, D, H, W)``. For a T1-only model, the channel
             dimension is 1. If using multiple modalities, this structure should
             be updated to allow more channels.
 
-        months_since_prior_mri: Time gap in months from the previous MRI.
+        months_since_prior_mri (VisitFloatTensor): Time gap in months from the previous MRI.
             The first visit should usually be 0. Shape: ``(n_visits,)``.
 
-        months_since_baseline_mri: Time gap in months from the baseline MRI.
+        months_since_baseline_mri (VisitFloatTensor): Time gap in months from the baseline MRI.
             Shape: ``(n_visits,)``.
 
-        time_to_event: Scalar time to event or censoring, measured in
-            months from visit.
+        time_to_event_from_baseline (ScalarFloatTensor): Time to event or censoring, measured in
+            months from baseline. Shape: ``()``.
 
-        dx_code_at_visit: Diagnosis code at each visit, either 0 ("CN"), 1 ("MCI"), or 2 ("AD").
+        time_to_event_from_mri (VisitFloatTensor): Time to event or censoring, measured in
+            months from each MRI visit. Shape: ``(n_visits,)``.
+
+        dx_code_at_visit (VisitLongTensor): Diagnosis code at each visit, either 0 ("CN"), 1 ("MCI"), or 2 ("AD").
             Shape: ``(n_visits,)``.
 
-        age_at_baseline: Scalar participant age at baseline visit.
+        age_at_baseline (ScalarFloatTensor): Scalar participant age at baseline visit.
+
+        age_at_image (VisitFloatTensor): Participant age at each MRI visit. Shape: ``(n_visits,)``.
+
+        is_censored (ScalarBoolTensor): Scalar boolean indicating whether the participant is censored.
+
     """
 
     ptid: str
@@ -108,9 +116,12 @@ class ADNISubjectTensorDictMin(TypedDict):
     images: MRISequenceTensor | None
     months_since_prior_mri: VisitFloatTensor
     months_since_baseline_mri: VisitFloatTensor
-    time_to_event: ScalarFloatTensor
+    time_to_event_from_baseline: ScalarFloatTensor
+    time_to_event_from_mri: VisitFloatTensor
     dx_code_at_visit: VisitLongTensor
     age_at_baseline: ScalarFloatTensor
+    age_at_image: VisitFloatTensor
+    is_censored: ScalarBoolTensor
 
 
 class ADNISubjectTensorDictFull(TypedDict):
@@ -181,7 +192,7 @@ class ADNISubjectTensorDictFull(TypedDict):
 
     img_ids: list[str]
     ptid: str
-    image: MRISequenceTensor
+    images: MRISequenceTensor
 
     months_since_baseline_mri: VisitFloatTensor
     months_since_prior_mri: VisitFloatTensor
