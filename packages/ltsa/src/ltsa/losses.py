@@ -211,6 +211,79 @@ def cox_surv_loss(hazards: Tensor, S: Tensor, c: Tensor, device: device | None, 
     return loss_cox
 
 
+def cox_ph_loss(risk: Tensor, time: Tensor, event: Tensor) -> Tensor:
+    """Computes the Cox proportional hazards partial log-likelihood loss.
+
+    This loss is commonly used to train neural survival models that predict a
+    continuous relative risk score for each observation. Rather than predicting
+    survival probabilities directly, the model learns a scalar log-risk score,
+    where higher values correspond to a greater instantaneous hazard.
+
+    The loss is the negative Cox partial log-likelihood:
+
+        L = -Σ_i δ_i (r_i - log Σ_{j∈R_i} exp(r_j))
+
+    where:
+        - r_i is the predicted log-risk score for observation i,
+        - δ_i is the event indicator (1 if the event occurred, 0 if censored),
+        - R_i is the risk set consisting of all individuals still at risk at
+          the event time of observation i.
+
+    This implementation sorts observations by descending observed survival time
+    so that each cumulative sum corresponds to a Cox risk set. The denominator
+    is computed using ``torch.logcumsumexp`` for improved numerical stability
+    over explicitly exponentiating and summing the risk scores.
+
+    Notes:
+        - The model should output an unrestricted scalar log-risk score
+          (i.e., **not** a probability or hazard value).
+        - ``event`` should be 1 for observed events and 0 for right-censored
+          observations.
+        - This implementation approximates the Cox partial likelihood when
+          training with minibatches, since risk sets are limited to the current
+          batch. Using the full dataset (or very large batches) yields the exact
+          partial likelihood.
+
+    Args:
+        risk:
+            Predicted log-risk scores of shape ``(batch_size,)`` or
+            ``(batch_size, 1)``.
+        time:
+            Observed event or censoring times for each observation. Shape
+            ``(batch_size,)``.
+        event:
+            Event indicator where 1 denotes an observed event and 0 denotes
+            right-censoring. Shape ``(batch_size,)``.
+
+    Returns:
+        A scalar tensor representing the mean negative Cox partial
+        log-likelihood over all observed events in the batch.
+
+    References:
+        Cox, D. R. (1972). Regression Models and Life-Tables.
+        Journal of the Royal Statistical Society: Series B, 34(2), 187-220.
+
+        Katzman et al. (2018). DeepSurv: Personalized Treatment Recommender
+        System Using a Cox Proportional Hazards Deep Neural Network.
+    """
+    risk = risk.reshape(-1)
+    time = time.reshape(-1)
+    event = event.reshape(-1).to(dtype=risk.dtype)
+
+    order = torch.argsort(time, descending=True)
+
+    risk = risk[order]
+    event = event[order]
+
+    log_cumsum_risk = torch.logcumsumexp(risk, dim=0)
+
+    partial_log_likelihood = (risk - log_cumsum_risk) * event
+
+    loss = -partial_log_likelihood.sum() / event.sum().clamp_min(1.0)
+
+    return loss
+
+
 class CrossEntropySurvLoss(object):
     """Cross entropy survival loss object"""
 
@@ -253,3 +326,10 @@ class CoxSurvLoss(object):
 
     def __call__(hazards: Tensor, S: Tensor, c, device: device | None, **kwargs):
         return cox_surv_loss(hazards=hazards, S=S, c=c, device=device, **kwargs)
+
+
+class CoxPHSurvLoss(object):
+    """Cox proportional hazards survival loss object"""
+
+    def __call__(self, risk: Tensor, time: Tensor, event: Tensor, **kwargs):
+        return cox_ph_loss(risk=risk, time=time, event=event, **kwargs)

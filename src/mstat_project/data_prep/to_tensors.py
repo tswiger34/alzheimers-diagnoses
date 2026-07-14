@@ -332,4 +332,4 @@ def main(limit: int | None = None, max_workers: int | None = None) -> None:
 
 
 if __name__ == "__main__":
-    main(100)
+    main()

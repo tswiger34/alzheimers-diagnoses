@@ -139,7 +139,7 @@ get_ptid_info AS (
 )
 
 SELECT
-    ptid_visit_date,
+        ptid_visit_date,
         image_id,
         ptid,
         image_date,
