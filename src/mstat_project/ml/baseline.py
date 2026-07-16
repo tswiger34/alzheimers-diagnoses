@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import random
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -32,25 +31,20 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from dotenv import load_dotenv
+from ltsa.losses import cox_ph_loss
 from sqlalchemy import Engine, text
 from torch.utils.data import DataLoader, Dataset
 from torchvision.models import ResNet101_Weights, resnet101
 
 from mstat_project.utils import get_db_engine
 
+from .utils import concordance_index, default_checkpoint_dir, default_tensor_dir
+
 load_dotenv()
 
 
-def _default_tensor_dir() -> Path:
-    return Path(os.getenv("IMAGES_PATH", "data/images")) / "tensors"
-
-
-def _default_checkpoint_dir() -> Path:
-    return Path(os.getenv("DATA_DIR", "data")) / "artifacts" / "model_checkpoints" / "baseline"
-
-
-TENSOR_PATH = _default_tensor_dir()
-CHECKPOINT_PATH = _default_checkpoint_dir()
+TENSOR_PATH = default_tensor_dir()
+CHECKPOINT_PATH = default_checkpoint_dir()
 SPLIT_NAMES = ("train", "validation", "test")
 
 
@@ -66,8 +60,8 @@ class TrainingConfig:
     seed: int = 42
     num_workers: int = 0
     device: str = "auto"
-    tensor_dir: Path = field(default_factory=_default_tensor_dir)
-    checkpoint_root: Path = field(default_factory=_default_checkpoint_dir)
+    tensor_dir: Path = field(default_factory=default_tensor_dir)
+    checkpoint_root: Path = field(default_factory=default_checkpoint_dir)
     spatial_size: tuple[int, int, int] | None = (96, 112, 96)
 
     def validate(self) -> None:
@@ -181,63 +175,6 @@ class SingleImageSurvivalModel(nn.Module):
             raise ValueError(f"Expected one MRI channel, got {x.shape[1]}")
         features = self.encoder(self._volume_to_resnet_input(x))
         return self.risk_head(features).squeeze(-1)
-
-
-def cox_ph_loss(risk: torch.Tensor, time: torch.Tensor, event: torch.Tensor) -> torch.Tensor:
-    """Negative Cox partial log-likelihood using Breslow handling for ties.
-
-    Higher ``risk`` means an earlier event.  Each event's risk set contains
-    patients whose observed time is greater than or equal to its event time.
-    """
-
-    risk = risk.reshape(-1)
-    time = time.reshape(-1).to(device=risk.device, dtype=risk.dtype)
-    event = event.reshape(-1).to(device=risk.device, dtype=torch.bool)
-    if not (risk.numel() == time.numel() == event.numel()):
-        raise ValueError("risk, time, and event must have the same number of elements")
-    if risk.numel() == 0:
-        raise ValueError("Cox loss requires at least one observation")
-    if not torch.isfinite(risk).all() or not torch.isfinite(time).all():
-        raise ValueError("risk and time must contain only finite values")
-
-    event_times = torch.unique(time[event])
-    if event_times.numel() == 0:
-        return risk.sum() * 0.0
-
-    log_likelihood_terms: list[torch.Tensor] = []
-    for event_time in event_times:
-        tied_events = event & (time == event_time)
-        event_count = tied_events.sum()
-        risk_set = time >= event_time
-        term = risk[tied_events].sum() - event_count * torch.logsumexp(risk[risk_set], dim=0)
-        log_likelihood_terms.append(term)
-
-    return -torch.stack(log_likelihood_terms).sum() / event.sum()
-
-
-def concordance_index(risk: torch.Tensor, time: torch.Tensor, event: torch.Tensor) -> float:
-    """Compute Harrell's C-index for right-censored outcomes.
-
-    A pair is comparable when the patient with the shorter observed time had
-    an event.  Risk ties receive half credit.  ``nan`` is returned when no
-    comparable pairs exist.
-    """
-
-    risk = risk.detach().reshape(-1).to(device="cpu", dtype=torch.float64)
-    time = time.detach().reshape(-1).to(device="cpu", dtype=torch.float64)
-    event = event.detach().reshape(-1).to(device="cpu", dtype=torch.bool)
-    if not (risk.numel() == time.numel() == event.numel()):
-        raise ValueError("risk, time, and event must have the same number of elements")
-
-    comparable = event[:, None] & (time[:, None] < time[None, :])
-    comparable_count = int(comparable.sum().item())
-    if comparable_count == 0:
-        return math.nan
-
-    risk_difference = risk[:, None] - risk[None, :]
-    concordant = ((risk_difference > 0) & comparable).sum(dtype=torch.float64)
-    tied = ((risk_difference == 0) & comparable).sum(dtype=torch.float64)
-    return float(((concordant + 0.5 * tied) / comparable_count).item())
 
 
 def get_last_scan(engine: Engine | None = None) -> pl.DataFrame:
@@ -927,8 +864,8 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda, cuda:0, or mps")
-    parser.add_argument("--tensor-dir", type=Path, default=_default_tensor_dir())
-    parser.add_argument("--checkpoint-dir", type=Path, default=_default_checkpoint_dir())
+    parser.add_argument("--tensor-dir", type=Path, default=default_tensor_dir())
+    parser.add_argument("--checkpoint-dir", type=Path, default=default_checkpoint_dir())
     parser.add_argument(
         "--spatial-size",
         type=int,

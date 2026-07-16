@@ -211,77 +211,36 @@ def cox_surv_loss(hazards: Tensor, S: Tensor, c: Tensor, device: device | None, 
     return loss_cox
 
 
-def cox_ph_loss(risk: Tensor, time: Tensor, event: Tensor) -> Tensor:
-    """Computes the Cox proportional hazards partial log-likelihood loss.
+def cox_ph_loss(risk: torch.Tensor, time: torch.Tensor, event: torch.Tensor) -> torch.Tensor:
+    """Negative Cox partial log-likelihood using Breslow handling for ties.
 
-    This loss is commonly used to train neural survival models that predict a
-    continuous relative risk score for each observation. Rather than predicting
-    survival probabilities directly, the model learns a scalar log-risk score,
-    where higher values correspond to a greater instantaneous hazard.
-
-    The loss is the negative Cox partial log-likelihood:
-
-        L = -Σ_i δ_i (r_i - log Σ_{j∈R_i} exp(r_j))
-
-    where:
-        - r_i is the predicted log-risk score for observation i,
-        - δ_i is the event indicator (1 if the event occurred, 0 if censored),
-        - R_i is the risk set consisting of all individuals still at risk at
-          the event time of observation i.
-
-    This implementation sorts observations by descending observed survival time
-    so that each cumulative sum corresponds to a Cox risk set. The denominator
-    is computed using ``torch.logcumsumexp`` for improved numerical stability
-    over explicitly exponentiating and summing the risk scores.
-
-    Notes:
-        - The model should output an unrestricted scalar log-risk score
-          (i.e., **not** a probability or hazard value).
-        - ``event`` should be 1 for observed events and 0 for right-censored
-          observations.
-        - This implementation approximates the Cox partial likelihood when
-          training with minibatches, since risk sets are limited to the current
-          batch. Using the full dataset (or very large batches) yields the exact
-          partial likelihood.
-
-    Args:
-        risk:
-            Predicted log-risk scores of shape ``(batch_size,)`` or
-            ``(batch_size, 1)``.
-        time:
-            Observed event or censoring times for each observation. Shape
-            ``(batch_size,)``.
-        event:
-            Event indicator where 1 denotes an observed event and 0 denotes
-            right-censoring. Shape ``(batch_size,)``.
-
-    Returns:
-        A scalar tensor representing the mean negative Cox partial
-        log-likelihood over all observed events in the batch.
-
-    References:
-        Cox, D. R. (1972). Regression Models and Life-Tables.
-        Journal of the Royal Statistical Society: Series B, 34(2), 187-220.
-
-        Katzman et al. (2018). DeepSurv: Personalized Treatment Recommender
-        System Using a Cox Proportional Hazards Deep Neural Network.
+    Higher ``risk`` means an earlier event.  Each event's risk set contains
+    patients whose observed time is greater than or equal to its event time.
     """
+
     risk = risk.reshape(-1)
-    time = time.reshape(-1)
-    event = event.reshape(-1).to(dtype=risk.dtype)
+    time = time.reshape(-1).to(device=risk.device, dtype=risk.dtype)
+    event = event.reshape(-1).to(device=risk.device, dtype=torch.bool)
+    if not (risk.numel() == time.numel() == event.numel()):
+        raise ValueError("risk, time, and event must have the same number of elements")
+    if risk.numel() == 0:
+        raise ValueError("Cox loss requires at least one observation")
+    if not torch.isfinite(risk).all() or not torch.isfinite(time).all():
+        raise ValueError("risk and time must contain only finite values")
 
-    order = torch.argsort(time, descending=True)
+    event_times = torch.unique(time[event])
+    if event_times.numel() == 0:
+        return risk.sum() * 0.0
 
-    risk = risk[order]
-    event = event[order]
+    log_likelihood_terms: list[torch.Tensor] = []
+    for event_time in event_times:
+        tied_events = event & (time == event_time)
+        event_count = tied_events.sum()
+        risk_set = time >= event_time
+        term = risk[tied_events].sum() - event_count * torch.logsumexp(risk[risk_set], dim=0)
+        log_likelihood_terms.append(term)
 
-    log_cumsum_risk = torch.logcumsumexp(risk, dim=0)
-
-    partial_log_likelihood = (risk - log_cumsum_risk) * event
-
-    loss = -partial_log_likelihood.sum() / event.sum().clamp_min(1.0)
-
-    return loss
+    return -torch.stack(log_likelihood_terms).sum() / event.sum()
 
 
 class CrossEntropySurvLoss(object):
