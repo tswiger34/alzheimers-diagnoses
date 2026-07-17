@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import ClassVar, override
+from typing import override
 
 from torch import Tensor, nn
 from torchvision.models import ResNet, ResNet18_Weights, Swin_V2_T_Weights, SwinTransformer, resnet18, swin_v2_t
@@ -48,7 +48,9 @@ class ResNetEncoder(ImageEncoder[ResNet]):
         weights (ResNet18_Weights): Pre-trained weights for initialization, uses the `IMAGENET1K_V1` weights
     """
 
-    weights: ClassVar[ResNet18_Weights] = ResNet18_Weights.IMAGENET1K_V1
+    def __init__(self, weights: ResNet18_Weights | None = ResNet18_Weights.IMAGENET1K_V1) -> None:
+        self.weights = weights
+        super().__init__()
 
     @override
     def _build_model(self) -> ResNet:
@@ -60,7 +62,7 @@ class ResNetEncoder(ImageEncoder[ResNet]):
 
     @override
     def _set_model_state(self) -> None:
-        self._model.fc = nn.Identity()
+        self._model.fc = nn.Identity()  # ty: ignore[invalid-assignment]
 
 
 class SwinEncoder(ImageEncoder[SwinTransformer]):
@@ -70,7 +72,9 @@ class SwinEncoder(ImageEncoder[SwinTransformer]):
         weights (Swin_V2_T_Weights): Pre-trained weights for initialization, uses the `IMAGENET1K_V1` weights
     """
 
-    weights: ClassVar[Swin_V2_T_Weights] = Swin_V2_T_Weights.IMAGENET1K_V1
+    def __init__(self, weights: Swin_V2_T_Weights | None = Swin_V2_T_Weights.IMAGENET1K_V1) -> None:
+        self.weights = weights
+        super().__init__()
 
     @override
     def _build_model(self) -> SwinTransformer:
@@ -82,4 +86,4 @@ class SwinEncoder(ImageEncoder[SwinTransformer]):
 
     @override
     def _set_model_state(self) -> None:
-        self._model.head = nn.Identity()
+        self._model.head = nn.Identity()  # ty: ignore[invalid-assignment]

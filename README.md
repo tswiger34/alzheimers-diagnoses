@@ -1,47 +1,70 @@
 # LTSA MSTAT Project
 
-## Single-image survival baseline
+This project compares a longitudinal transformer survival model (LTSA) with a matched single-MRI Cox baseline for Alzheimer's disease prognosis.
 
-The baseline selects one MRI per patient: the final eligible MRI strictly before AD diagnosis for an event
-patient, or the final MRI for a censored patient. It trains an ImageNet-pretrained ResNet-101 on the MRI's three
-orthogonal center slices using the Cox partial likelihood, then evaluates the validation-selected checkpoint with
-Harrell's C-index on the patient-level test split.
+## Fixed-landmark comparison
+
+The comparison uses the existing patient-level train, validation, and test split. For each landmark `L` (0, 12, 24, and 36 months by default):
+
+- A patient is eligible only when their event or censoring time is strictly greater than `L`.
+- Only valid MRIs acquired on or before `L` are included.
+- The Cox baseline receives the latest eligible MRI.
+- LTSA receives the complete chronological MRI prefix.
+- Follow-up is modeled from the landmark: `outcome time - L`.
+
+Before either model starts, every configured landmark is checked for tensor availability, non-empty splits, observed events, and comparable survival pairs. Both models then use the same frozen cohort records.
+
+The shared MRI encoder converts each volume to axial, coronal, and sagittal center slices and applies identical ResNet-101/ImageNet preprocessing. BatchNorm running statistics remain frozen during fine-tuning.
+
+## Training
+
+Install the workspace and verify the command-line entry points:
 
 ```powershell
-uv run python -m mstat_project.ml.baseline --epochs 10 --batch-size 2 --device auto
+uv sync
+uv run python -m mstat_project.ml.ltsa --help
+uv run python -m mstat_project.ml.compare --help
 ```
 
-Checkpoints are written to `data/artifacts/model_checkpoints/baseline/<run_id>/epoch_NNN.pt`. The command creates
-and populates these Postgres tables:
+Train one LTSA landmark:
 
-- `_ml.baseline_runs`: configuration, cohort counts, best epoch, and test C-index
-- `_ml.baseline_epoch_metrics`: training/validation metrics and checkpoint path for every epoch
-- `_ml.baseline_run_patients`: exact image, outcome, and split used for every patient
-- `_ml.baseline_test_predictions`: patient-level test risk scores
-
-For example, inspect completed experiments with:
-
-```sql
-SELECT run_id, completed_at, best_epoch, best_validation_loss, test_c_index
-FROM _ml.baseline_runs
-WHERE status = 'completed'
-ORDER BY completed_at DESC;
+```powershell
+uv run python -m mstat_project.ml.ltsa --landmark-months 12
 ```
 
-## Methodology
+Train matched baseline/LTSA pairs at all default landmarks and compute a 1,000-sample paired patient-bootstrap confidence interval:
 
-We approach disease prognosis through the lens of survival analysis, which aims to model a “time-to-event” outcome from potentially time-varying input features. We adopted a discrete-time survival model, given that imaging measurements were either acquired at intervals as short as 6 months (AREDS) or 1 year (OHTS), and we assumed uninformative right-censoring. The collection of longitudinal images for eye i can be written
+```powershell
+uv run python -m mstat_project.ml.compare
+```
 
-where Ji is the number of longitudinal images acquired for eye i, ti, j is the time (in years) of the jth image measurement for eye i, and [Math Processing Error]
- is the fundus image (of height H and width W) acquired at time ti, j. Similar to the formulation of DynamicDeepHit33, we distinguish between discrete time steps j and actual elapsed times t since images are acquired at irregular intervals and the number of images per eye, Ji, is variable. In other words, Xi(t) represents the collection of longitudinal images of eye i acquired up until time t; for shorthand, we use Xi to denote the full available sequence of longitudinal images for eye i (i.e., [Math Processing Error]
-). For each Xi, we also have a time to event τi, which is either the time at which the event occurred (e.g., eye developed late AMD – denoted ci = 0) or the censoring time (e.g., the patient was lost to follow-up or the study ended – denoted ci = 1).
+Useful smoke-test options are `--epochs 1 --patience 1 --no-pretrained`. Real training defaults to AdamW with learning rate `1e-4`, weight decay `1e-4`, gradient clipping at `5.0`, batch size 2, 50 epochs, patience 10, and seed 42.
 
-The goal of deep survival analysis in longitudinal imaging is to approximate a function that links the time to event to our time-varying image measurements. A typical way to reason about the time to event is through the hazard function.
+LTSA uses six-month discrete hazards, censoring NLL with `beta=0.15`, and next-visit feature MSE weighted by `1.0`. Its final time bin is reserved for durations beyond the maximum training support. Checkpoints are selected by validation C-index, with validation loss as the tie-breaker. LTSA risk is negative restricted mean survival time; the baseline uses the exact full-risk-set Cox partial likelihood.
 
-The conditional probability that eye i develops the disease at a discrete time step j, based on longitudinal measurements Xi, given that the true event time step is greater than or equal to j.
+## Results
 
-The probability that the eye i does not develop the disease (“survives”) past the time step j.
+Checkpoints are written below `data/artifacts/model_checkpoints`. New comparison runs populate:
 
-Specifically, in this study, we train a neural network f(∙) to directly map from a longitudinal imaging sequence to the discrete hazard distribution
+- `_ml.survival_runs`: configuration, cohort/event counts, checkpoint selection, test C-index, and paired confidence intervals.
+- `_ml.survival_epoch_metrics`: total, survival, and auxiliary losses; C-indices; learning rate; and checkpoint path.
+- `_ml.survival_run_patients`: exact split, outcome, selected MRI, and chronological image history.
+- `_ml.survival_test_predictions`: scalar risk, outcome, image history, and LTSA survival curve.
 
-Where Jmax is the total number of discrete time steps, typically chosen based on properties of the dataset, time-to-event task, and computational constraints. While hazards are computed for all time steps, including those that have already occurred before the time step t, our primary interest lies in the future hazards. As explained below, we mask out prior time steps to properly optimize and evaluate models. For models trained on AREDS data—captured in 6-month intervals with a maximum observed follow-up time of 13 years—we have set. For models trained on OHTS data—acquired in 1-year intervals with a maximum follow-up of 14 years—we have set
+The original `mstat_project.ml.baseline` command and `_ml.baseline_*` tables remain available as legacy history.
+
+## Verification
+
+Run the focused ML/package checks with:
+
+```powershell
+uv run pytest tests/ltsa tests/mstat_project/test_baseline.py tests/mstat_project/test_landmarks.py tests/mstat_project/test_ltsa_training.py tests/mstat_project/test_comparison_e2e.py -q
+uv run ruff check packages/ltsa/src src/mstat_project/ml
+uv run ty check
+```
+
+The LTSA architecture follows [Harnessing the Power of Longitudinal Medical Imaging for Eye Disease Prognosis Using Transformer-based Sequence Modeling](https://pmc.ncbi.nlm.nih.gov/articles/PMC11329720/) and the [authors' implementation](https://github.com/bionlplab/longitudinal_transformer_for_survival_analysis).
+
+## Known unrelated test drift
+
+The repository-wide suite still contains tests outside this comparison scope that target removed or renamed APIs. `test_diagnoses_csv.py` imports the absent `mstat_project.data_models` package, and six `test_to_nifti.py` cases reference older NIfTI helper names. These failures are separate from the focused ML/LTSA suite above.

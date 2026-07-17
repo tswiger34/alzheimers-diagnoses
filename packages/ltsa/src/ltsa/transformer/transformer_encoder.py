@@ -54,7 +54,7 @@ class TransformerEncoder(Module):
         src_key_padding_mask: Optional[Tensor] = None,
         is_causal: Optional[bool] = None,
         need_weights: Optional[bool] = False,
-    ) -> tuple[Tensor, list[Tensor]]:
+    ) -> tuple[Tensor, list[Tensor | None]]:
         r"""Pass the input through the encoder layers in turn.
 
         Args:
@@ -74,6 +74,14 @@ class TransformerEncoder(Module):
             other_type=F._none_or_dtype(input=mask),
             other_name="mask",
             target_type=src.dtype,
+        )
+        mask = F._canonical_mask(
+            mask=mask,
+            mask_name="mask",
+            other_type=None,
+            other_name="",
+            target_type=src.dtype,
+            check_other=False,
         )
 
         output: Tensor = src
@@ -168,7 +176,7 @@ class TransformerEncoder(Module):
 
         is_causal: bool = make_causal
 
-        attn_maps: list[Tensor] = []
+        attn_maps: list[Tensor | None] = []
         for mod in self.layers:
             output, attn_map = mod(
                 output,
@@ -308,7 +316,7 @@ class TransformerEncoderLayer(Module):
         src_key_padding_mask: Optional[Tensor] = None,
         is_causal: bool = False,
         need_weights: bool = False,
-    ) -> tuple[Tensor, list]:
+    ) -> tuple[Tensor, Tensor | None]:
         r"""Pass the input through the encoder layer.
 
         Args:
@@ -380,7 +388,7 @@ class TransformerEncoderLayer(Module):
                     "input/output projection weights or biases requires_grad"
                 )
 
-            why_not_sparsity_fast_path = "test"
+            why_not_sparsity_fast_path = "attention-map output requires the Python implementation"
 
             if not why_not_sparsity_fast_path:
                 merged_mask, mask_type = self.self_attn.merge_masks(src_mask, src_key_padding_mask, src)
@@ -432,10 +440,16 @@ class TransformerEncoderLayer(Module):
         attn_mask: Optional[Tensor],
         key_padding_mask: Optional[Tensor],
         need_weights: Optional[bool] = False,
-    ) -> tuple[Tensor, list]:
+    ) -> tuple[Tensor, Tensor | None]:
         """Self-Attention block"""
         x, attn_map = self.self_attn(
-            x, x, x, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=need_weights
+            x,
+            x,
+            x,
+            attn_mask=attn_mask,
+            key_padding_mask=key_padding_mask,
+            need_weights=need_weights,
+            average_attn_weights=False,
         )
 
         return self.dropout1(x), attn_map

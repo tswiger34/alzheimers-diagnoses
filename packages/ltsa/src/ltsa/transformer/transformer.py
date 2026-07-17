@@ -178,8 +178,8 @@ class Transformer(Module):
         if src.size(dim=-1) != self.d_model or tgt.size(dim=-1) != self.d_model:
             raise RuntimeError("the feature number of src and tgt must be equal to d_model")
 
-        memory: Tensor = self.encoder(src, mask=src_mask, src_key_padding_mask=src_key_padding_mask)
-        output: Tensor = self.decoder(
+        memory, _ = self.encoder(src, mask=src_mask, src_key_padding_mask=src_key_padding_mask)
+        output, _, _ = self.decoder(
             tgt,
             memory,
             tgt_mask=tgt_mask,

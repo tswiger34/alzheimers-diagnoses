@@ -1,3 +1,7 @@
+"""Longitudinal Transformer for Survival Analysis."""
+
+from collections.abc import Sequence
+
 import torch
 from torch import Tensor
 
@@ -8,135 +12,130 @@ from ltsa.transformer.transformer_encoder import TransformerEncoder, Transformer
 
 
 class LTSA(torch.nn.Module):
-    """Full LTSA architecture implementation
-
-    The input to :class:``LTSA`` on the forward pass consists of a collection of longitudinal images and key
-    metadata for performing survival analysis. Each observation in the pytorch dataset should *at least*
-    include the image and the associated metadata. For examples of how to organize your data into valid datasets
-    see `docs/COOKBOOK.md`. The minimal metadata is layed out in :class:``SuvivalAnalysisMetadata``.
-    """
+    """Causal longitudinal image model with discrete survival predictions."""
 
     def __init__(
         self,
         img_encoder: ImageEncoder,
+        *,
         n_heads: int,
         dropout: float,
         n_layers: int,
-        max_seq_len: int,
-        n_classes: int,
-        device: torch.device | None = None,
-    ):
+        max_sequence_length: int,
+        max_time_index: float,
+        n_time_bins: int,
+    ) -> None:
         super().__init__()
-        self.max_seq_len: int = max_seq_len
-        self.device: torch.device | None = device
-        self.img_encoder: ImageEncoder = img_encoder
+        if max_sequence_length < 1:
+            raise ValueError("max_sequence_length must be positive")
+        if n_time_bins < 2:
+            raise ValueError("n_time_bins must be at least 2")
+        if n_layers < 1:
+            raise ValueError("n_layers must be positive")
+        if n_heads < 1 or img_encoder.n_features % n_heads != 0:
+            raise ValueError("n_heads must evenly divide the image encoder feature width")
 
-        transformer_encoder = TransformerEncoderLayer(
-            d_model=self.img_encoder.n_features,
+        self.max_sequence_length = max_sequence_length
+        self.img_encoder = img_encoder
+        encoder_layer = TransformerEncoderLayer(
+            d_model=img_encoder.n_features,
             nhead=n_heads,
-            dim_feedforward=self.img_encoder.n_features,
+            dim_feedforward=img_encoder.n_features,
             dropout=dropout,
             activation="relu",
             batch_first=True,
         )
-        self.transformer: TransformerEncoder = TransformerEncoder(
-            encoder_layer=transformer_encoder, num_layers=n_layers
+        self.transformer = TransformerEncoder(encoder_layer=encoder_layer, num_layers=n_layers)
+        self.tpe = TemporalPositionalEncoding(
+            img_encoder.n_features,
+            dropout=0.0,
+            max_time_index=max_time_index,
         )
-
-        self.tpe: TemporalPositionalEncoding = TemporalPositionalEncoding(
-            d_model=self.img_encoder.n_features, dropout=0, max_len=max_seq_len * 12
-        )
-
         self.classifier = torch.nn.Sequential(
             torch.nn.Dropout(p=dropout),
-            torch.nn.Linear(in_features=self.img_encoder.n_features, out_features=n_classes),
+            torch.nn.Linear(img_encoder.n_features, n_time_bins),
             torch.nn.Sigmoid(),
         )
-
         self.step_ahead_predictor = torch.nn.Sequential(
             torch.nn.Dropout(p=dropout),
-            torch.nn.Linear(in_features=self.img_encoder.n_features, out_features=self.img_encoder.n_features),
+            torch.nn.Linear(img_encoder.n_features, img_encoder.n_features),
+        )
+        self.register_buffer(
+            "causal_mask",
+            torch.triu(
+                torch.ones((max_sequence_length, max_sequence_length), dtype=torch.bool),
+                diagonal=1,
+            ),
         )
 
-        self.causal_mask: Tensor = torch.triu(
-            input=torch.full(size=(max_seq_len, max_seq_len), fill_value=float("-inf"), device=self.device),
-            diagonal=1,
-        )
+    def _validate_inputs(
+        self,
+        images: Tensor,
+        sequence_lengths: Tensor | Sequence[int],
+        relative_times: Tensor,
+    ) -> Tensor:
+        if images.ndim < 4:
+            raise ValueError(f"Expected sequence-shaped images [batch, visits, ...], got {tuple(images.shape)}")
+        batch_size, sequence_length = images.shape[:2]
+        if sequence_length > self.max_sequence_length:
+            raise ValueError(
+                f"Sequence length {sequence_length} exceeds configured maximum {self.max_sequence_length}"
+            )
+        lengths = torch.as_tensor(sequence_lengths, device=images.device, dtype=torch.long)
+        if lengths.shape != (batch_size,):
+            raise ValueError(f"sequence_lengths must have shape ({batch_size},), got {tuple(lengths.shape)}")
+        if (lengths < 1).any() or (lengths > sequence_length).any():
+            raise ValueError("sequence_lengths must be between 1 and the padded sequence length")
+        if relative_times.shape != (batch_size, sequence_length):
+            raise ValueError(
+                f"relative_times must have shape {(batch_size, sequence_length)}, got {tuple(relative_times.shape)}"
+            )
+        return lengths
 
-    def _create_mask(self, tpe_augmented: Tensor, seq_lengths: tuple[int]) -> Tensor:
-        """Create a key padding mask for variable-length longitudinal sequences.
+    def forward(
+        self,
+        images: Tensor,
+        *,
+        sequence_lengths: Tensor | Sequence[int],
+        relative_times: Tensor,
+    ) -> LTSAOutputs:
+        lengths = self._validate_inputs(images, sequence_lengths, relative_times)
+        batch_size, sequence_length = images.shape[:2]
+        embeddings = self.img_encoder(images.reshape(batch_size * sequence_length, *images.shape[2:]))
+        if embeddings.ndim != 2 or embeddings.shape != (
+            batch_size * sequence_length,
+            self.img_encoder.n_features,
+        ):
+            raise ValueError(
+                f"Image encoder must return [batch * visits, n_features], got {tuple(embeddings.shape)}"
+            )
+        embeddings = embeddings.reshape(batch_size, sequence_length, self.img_encoder.n_features)
+        temporal_features = self.tpe(embeddings, relative_times)
 
-        Masks all tokens beyond last visit, 1 = pad (ignore), 0 = valid (keep)
-
-        Args:
-            tpe_augmented: Batch-first tensor of temporally encoded visit features with shape
-                ``(batch_size, seq_len, n_features)``.
-            seq_lengths: Number of valid visits for each sequence in the batch.
-
-        Returns:
-            Tensor: Float mask of shape ``(batch_size, seq_len)`` where padded positions are ``1``
-            and valid positions are ``0``.
-        """
-        src_key_padding_mask: Tensor = (
-            torch.ones(size=(tpe_augmented.shape[0], tpe_augmented.shape[1])).float().to(device=self.device)
-        )
-        for i, seq_length in enumerate(seq_lengths):
-            src_key_padding_mask[i, :seq_length] = 0
-        return src_key_padding_mask
-
-    def forward(self, x: Tensor, seq_lengths: tuple[int], rel_times: Tensor) -> LTSAOutputs:
-        embeddings: Tensor = self.img_encoder(x).reshape(  # shape: batch_size x seq_length x n_features
-            len(seq_lengths), self.max_seq_len, self.img_encoder.n_features
-        )
-
-        tpe_augmented: Tensor = self.tpe(embeddings, rel_times)  # shape: batch_size x seq_len x n_features
-
-        src_key_padding_mask: Tensor = self._create_mask(tpe_augmented=tpe_augmented, seq_lengths=seq_lengths)
-
-        feats, attn_map = self.transformer(
-            tpe_augmented,
-            mask=self.causal_mask,
-            src_key_padding_mask=src_key_padding_mask,
+        visit_indices = torch.arange(sequence_length, device=images.device).unsqueeze(0)
+        valid_visit_mask = visit_indices < lengths.unsqueeze(1)
+        features, attention_maps = self.transformer(
+            temporal_features,
+            mask=self.get_buffer("causal_mask")[:sequence_length, :sequence_length],
+            src_key_padding_mask=~valid_visit_mask,
             is_causal=True,
             need_weights=True,
         )
 
-        # Using src_key_padding_mask undoes padding so re-pad each sequence in the batch with zeroes
-        if feats.shape[1] < self.max_seq_len:
-            feats: Tensor = torch.nn.functional.pad(
-                input=feats, pad=(0, 0, 0, self.max_seq_len - feats.shape[1], 0, 0), mode="constant"
-            )
+        hazards = self.classifier(features)
+        survival = torch.cumprod(1 - hazards, dim=-1)
+        delta_times = torch.diff(relative_times, dim=1).clamp_min(0)
+        delta_times = torch.nn.functional.pad(delta_times, (0, 1), mode="constant", value=0)
+        feature_predictions = self.step_ahead_predictor(self.tpe(features, delta_times))
+        feature_targets = torch.nn.functional.pad(features[:, 1:, :], (0, 0, 0, 1), value=0)
+        next_visit_mask = visit_indices < (lengths - 1).clamp_min(0).unsqueeze(1)
 
-        hazards: Tensor = self.classifier(feats)
-        surv: Tensor = torch.cumprod(input=1 - hazards.view(-1, hazards.shape[-1]), dim=1).view(
-            hazards.shape[0], hazards.shape[1], hazards.shape[2]
-        )
-
-        # Padding mask used to compute loss later
-        padding_mask: Tensor = torch.bitwise_not(input=src_key_padding_mask.bool()).unsqueeze(dim=-1)
-
-        # Get time elapsed (delta) between consecutive visits
-        delta_times: Tensor = torch.diff(input=rel_times)  # batch x max_seq_len-1
-        delta_times[delta_times < 0] = 0
-        delta_times: Tensor = torch.nn.functional.pad(
-            input=delta_times, pad=(0, 1), mode="constant", value=0
-        )  # batch x max_seq_len
-
-        # Use relative temporal timestep encoding to inform the model of "# months of into the future for which to predict imaging features"
-        delta_encoded_feats: Tensor = self.tpe(feats, delta_times)
-
-        # Get actual imaging features of next visit
-        feat_preds: Tensor = self.step_ahead_predictor(delta_encoded_feats)
-        feat_targets: Tensor = torch.nn.functional.pad(
-            input=feats[:, 1:, :], pad=(0, 0, 0, 1), mode="constant", value=0
-        )
-
-        results = LTSAOutputs(
+        return LTSAOutputs(
             hazards=hazards,
-            surv=surv,
-            feat_preds=feat_preds,
-            feat_targets=feat_targets,
-            padding_mask=padding_mask,
-            attn_map=attn_map,
+            surv=survival,
+            feat_preds=feature_predictions,
+            feat_targets=feature_targets,
+            valid_visit_mask=valid_visit_mask,
+            next_visit_mask=next_visit_mask,
+            attn_map=attention_maps,
         )
-        return results

@@ -208,7 +208,11 @@ class TransformerDecoderLayer(Module):
         x: Tensor = tgt
         if self.norm_first:
             _x, attn_map_sa = self._sa_block(
-                x=self.norm1(x), attn_mask=tgt_mask, key_padding_mask=tgt_key_padding_mask, is_causal=tgt_is_causal
+                x=self.norm1(x),
+                attn_mask=tgt_mask,
+                key_padding_mask=tgt_key_padding_mask,
+                is_causal=tgt_is_causal,
+                need_weights=need_weights,
             )
             x: Tensor = x + _x
             _x, attn_map_mha = self._mha_block(
@@ -217,12 +221,17 @@ class TransformerDecoderLayer(Module):
                 attn_mask=memory_mask,
                 key_padding_mask=memory_key_padding_mask,
                 is_causal=memory_is_causal,
+                need_weights=need_weights,
             )
             x: Tensor = x + _x
             x: Tensor = x + self._ff_block(x=self.norm3(x))
         else:
             _x, attn_map_sa = self._sa_block(
-                x, attn_mask=tgt_mask, key_padding_mask=tgt_key_padding_mask, is_causal=tgt_is_causal
+                x,
+                attn_mask=tgt_mask,
+                key_padding_mask=tgt_key_padding_mask,
+                is_causal=tgt_is_causal,
+                need_weights=need_weights,
             )
             x: Tensor = self.norm1(x + _x)
             _x, attn_map_mha = self._mha_block(
@@ -231,6 +240,7 @@ class TransformerDecoderLayer(Module):
                 attn_mask=memory_mask,
                 key_padding_mask=memory_key_padding_mask,
                 is_causal=memory_is_causal,
+                need_weights=need_weights,
             )
             x: Tensor = self.norm2(x + _x)
             x: Tensor = self.norm3(x + self._ff_block(x))
@@ -254,6 +264,7 @@ class TransformerDecoderLayer(Module):
             key_padding_mask=key_padding_mask,
             is_causal=is_causal,
             need_weights=need_weights,
+            average_attn_weights=False,
         )
         return self.dropout1(x), attn_map
 
@@ -275,6 +286,7 @@ class TransformerDecoderLayer(Module):
             key_padding_mask=key_padding_mask,
             is_causal=is_causal,
             need_weights=need_weights,
+            average_attn_weights=False,
         )
         return self.dropout2(x), attn_map
 

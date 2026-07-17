@@ -34,9 +34,10 @@ from dotenv import load_dotenv
 from ltsa.losses import cox_ph_loss
 from sqlalchemy import Engine, text
 from torch.utils.data import DataLoader, Dataset
-from torchvision.models import ResNet101_Weights, resnet101
+from torchvision.models import ResNet101_Weights
 
 from mstat_project.utils import get_db_engine
+from mstat_project.ml.models import OrthogonalSliceResNet101Encoder
 
 from .utils import concordance_index, default_checkpoint_dir, default_tensor_dir
 
@@ -115,65 +116,24 @@ class SingleImageSurvivalModel(nn.Module):
         weights: ResNet101_Weights | None = ResNet101_Weights.IMAGENET1K_V2,
     ):
         super().__init__()
-        self.encoder = resnet101(weights=weights)
-        encoded_features = self.encoder.fc.in_features
-        self.encoder.fc = nn.Identity()
-        self.risk_head = nn.Linear(encoded_features, 1)
-        self.register_buffer(
-            "imagenet_mean",
-            torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1),
-        )
-        self.register_buffer(
-            "imagenet_std",
-            torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1),
-        )
+        self.image_encoder = OrthogonalSliceResNet101Encoder(weights=weights)
+        self.risk_head = nn.Linear(self.image_encoder.n_features, 1)
+
+    @property
+    def encoder(self):
+        return self.image_encoder.model
 
     def train(self, mode: bool = True) -> SingleImageSurvivalModel:
         """Set training mode while retaining pretrained BatchNorm statistics."""
 
         super().train(mode)
-        if mode:
-            for module in self.encoder.modules():
-                if isinstance(module, nn.BatchNorm2d):
-                    module.eval()
         return self
 
     def _volume_to_resnet_input(self, x: torch.Tensor) -> torch.Tensor:
-        volume = x[:, 0]
-        depth_center = volume.shape[1] // 2
-        height_center = volume.shape[2] // 2
-        width_center = volume.shape[3] // 2
-
-        orthogonal_slices = (
-            volume[:, depth_center, :, :],
-            volume[:, :, height_center, :],
-            volume[:, :, :, width_center],
-        )
-        resized_slices = [
-            F.interpolate(
-                image_slice.unsqueeze(1),
-                size=(224, 224),
-                mode="bilinear",
-                align_corners=False,
-                antialias=True,
-            ).squeeze(1)
-            for image_slice in orthogonal_slices
-        ]
-        resnet_input = torch.stack(resized_slices, dim=1)
-
-        image_min = resnet_input.amin(dim=(1, 2, 3), keepdim=True)
-        image_max = resnet_input.amax(dim=(1, 2, 3), keepdim=True)
-        resnet_input = (resnet_input - image_min) / (image_max - image_min).clamp_min(1e-6)
-        imagenet_mean = self.get_buffer("imagenet_mean")
-        imagenet_std = self.get_buffer("imagenet_std")
-        return (resnet_input - imagenet_mean) / imagenet_std
+        return self.image_encoder.volume_to_resnet_input(x)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if x.ndim != 5:
-            raise ValueError(f"Expected [batch, channels, depth, height, width], got {tuple(x.shape)}")
-        if x.shape[1] != 1:
-            raise ValueError(f"Expected one MRI channel, got {x.shape[1]}")
-        features = self.encoder(self._volume_to_resnet_input(x))
+        features = self.image_encoder(x)
         return self.risk_head(features).squeeze(-1)
 
 

@@ -12,8 +12,8 @@ def default_tensor_dir() -> Path:
     return Path(os.getenv("IMAGES_PATH", "data/images")) / "tensors"
 
 
-def default_checkpoint_dir() -> Path:
-    return Path(os.getenv("DATA_DIR", "data")) / "artifacts" / "model_checkpoints" / "baseline"
+def default_checkpoint_dir(model_type: str = "baseline") -> Path:
+    return Path(os.getenv("DATA_DIR", "data")) / "artifacts" / "model_checkpoints" / model_type
 
 
 def concordance_index(risk: torch.Tensor, time: torch.Tensor, event: torch.Tensor) -> float:

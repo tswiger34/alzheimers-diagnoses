@@ -5,7 +5,7 @@ from typing import Hashable, Literal, NamedTuple, SupportsFloat
 
 from torch import Tensor
 
-from ltsa import ImageEncoder
+from ltsa.image_encoder import ImageEncoder
 from ltsa.transformer.transformer_encoder import TransformerEncoder, TransformerEncoderLayer
 
 
@@ -30,7 +30,7 @@ class TransformerOutput(NamedTuple):
     """
 
     feats: Tensor
-    attn_maps: list[Tensor]
+    attn_maps: list[Tensor | None]
 
 
 @dataclass(slots=True)
@@ -127,8 +127,8 @@ class SurvivalAnalysisMetadata:
     image tensor per observation, and a subject ID*
 
     ```python
-
     from ltsa import SurvivalAnalysisMetadata
+
 
     class ImageMetadata(SurvivalAnalysisMetadata):
         # Refine existing type hints
@@ -154,6 +154,6 @@ class LTSAOutputs:
     surv: Tensor
     feat_preds: Tensor
     feat_targets: Tensor
-    padding_mask: Tensor
-    ## TODO: Clarify attn_map output type
-    attn_map: list[Tensor] | Tensor | None
+    valid_visit_mask: Tensor
+    next_visit_mask: Tensor
+    attn_map: list[Tensor | None]

@@ -1,14 +1,13 @@
-import pytest  # noqa
+import torch
+
+from ltsa.image_encoder import ImageEncoder, ResNetEncoder, SwinEncoder
 
 
-def test_smoke_test():
-    """Smoke test that everything can get imported and classes get initialized"""
-    from ltsa.image_encoder import ImageEncoder, ResNetEncoder, SwinEncoder
-
-    resnet_encoder = ResNetEncoder()
-    swin_encoder = SwinEncoder()
-    img_encoder: type[ImageEncoder] = ImageEncoder
+def test_encoders_can_initialize_without_downloading_weights() -> None:
+    resnet_encoder = ResNetEncoder(weights=None)
+    swin_encoder = SwinEncoder(weights=None)
 
     assert isinstance(resnet_encoder, ImageEncoder)
     assert isinstance(swin_encoder, ImageEncoder)
-    assert img_encoder is not None
+    assert resnet_encoder(torch.randn(1, 3, 64, 64)).shape == (1, resnet_encoder.n_features)
+    assert swin_encoder(torch.randn(1, 3, 256, 256)).shape == (1, swin_encoder.n_features)
