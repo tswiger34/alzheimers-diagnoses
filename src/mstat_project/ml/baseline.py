@@ -36,8 +36,8 @@ from sqlalchemy import Engine, text
 from torch.utils.data import DataLoader, Dataset
 from torchvision.models import ResNet101_Weights
 
-from mstat_project.utils import get_db_engine
 from mstat_project.ml.models import OrthogonalSliceResNet101Encoder
+from mstat_project.utils import get_db_engine
 
 from .utils import concordance_index, default_checkpoint_dir, default_tensor_dir
 
@@ -51,7 +51,24 @@ SPLIT_NAMES = ("train", "validation", "test")
 
 @dataclass(frozen=True)
 class TrainingConfig:
-    """Configuration persisted with every experiment run."""
+    """Configuration persisted with every legacy baseline experiment.
+
+    Attributes:
+        epochs: Number of training epochs.
+        batch_size: Number of patients processed per ResNet mini-batch.
+        learning_rate: AdamW learning rate.
+        weight_decay: AdamW weight-decay coefficient.
+        gradient_clip_norm: Maximum parameter-gradient norm. Values less than
+            or equal to zero disable clipping.
+        seed: Seed applied to Python, PyTorch, and CUDA random generators.
+        num_workers: Worker processes assigned to each data loader.
+        device: PyTorch device specification, or ``"auto"`` for automatic
+            selection.
+        tensor_dir: Directory containing patient tensor packages.
+        checkpoint_root: Root directory for run-specific checkpoints.
+        spatial_size: Optional ``(depth, height, width)`` used to resize MRI
+            volumes. ``None`` preserves stored dimensions.
+    """
 
     epochs: int = 10
     batch_size: int = 2
@@ -66,6 +83,14 @@ class TrainingConfig:
     spatial_size: tuple[int, int, int] | None = (96, 112, 96)
 
     def validate(self) -> None:
+        """Validate training, loading, and preprocessing settings.
+
+        Raises:
+            ValueError: If epoch or batch counts are not positive, optimizer
+                settings are out of range, ``num_workers`` is negative, or a
+                configured spatial dimension is smaller than 16 voxels.
+        """
+
         if self.epochs < 1:
             raise ValueError("epochs must be at least 1")
         if self.batch_size < 1:
@@ -82,7 +107,16 @@ class TrainingConfig:
 
 @dataclass(frozen=True)
 class PatientRecord:
-    """The single image and single survival outcome used for one patient."""
+    """Single selected MRI and survival outcome for one patient.
+
+    Attributes:
+        ptid: Patient identifier.
+        image_id: Identifier of the selected MRI.
+        split: Patient-level train, validation, or test assignment.
+        observed_time_months: Baseline-to-event or baseline-to-censoring time.
+        event_observed: Whether Alzheimer's disease conversion was observed.
+        tensor_path: Path to the patient's longitudinal tensor package.
+    """
 
     ptid: str
     image_id: str
@@ -94,6 +128,17 @@ class PatientRecord:
 
 @dataclass
 class PredictionBundle:
+    """Aligned scalar risks, outcomes, and identifiers for one split.
+
+    Attributes:
+        risks: Cox log-risk score for each patient.
+        times: Baseline-relative event or censoring times.
+        events: Boolean event indicators.
+        indices: Dataset indices used to align two-pass score gradients.
+        ptids: Patient identifiers in prediction order.
+        image_ids: Selected MRI identifiers in prediction order.
+    """
+
     risks: torch.Tensor
     times: torch.Tensor
     events: torch.Tensor
@@ -115,30 +160,77 @@ class SingleImageSurvivalModel(nn.Module):
         self,
         weights: ResNet101_Weights | None = ResNet101_Weights.IMAGENET1K_V2,
     ):
+        """Initialize the shared MRI encoder and scalar Cox risk head.
+
+        Args:
+            weights: Optional torchvision ResNet-101 weights. ``None`` uses
+                random initialization.
+        """
+
         super().__init__()
         self.image_encoder = OrthogonalSliceResNet101Encoder(weights=weights)
         self.risk_head = nn.Linear(self.image_encoder.n_features, 1)
 
     @property
     def encoder(self):
+        """Return the underlying torchvision ResNet-101 module."""
+
         return self.image_encoder.model
 
     def train(self, mode: bool = True) -> SingleImageSurvivalModel:
-        """Set training mode while retaining pretrained BatchNorm statistics."""
+        """Set model mode while retaining frozen BatchNorm statistics.
+
+        Args:
+            mode: ``True`` for training mode or ``False`` for evaluation mode.
+
+        Returns:
+            This model instance.
+        """
 
         super().train(mode)
         return self
 
     def _volume_to_resnet_input(self, x: torch.Tensor) -> torch.Tensor:
+        """Convert 3D MRIs to normalized orthogonal-slice ResNet inputs.
+
+        Args:
+            x: MRI tensor shaped ``[batch, 1, depth, height, width]``.
+
+        Returns:
+            ImageNet-normalized tensor shaped ``[batch, 3, 224, 224]``.
+        """
+
         return self.image_encoder.volume_to_resnet_input(x)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Predict one Cox log-risk score per MRI.
+
+        Args:
+            x: MRI tensor shaped ``[batch, 1, depth, height, width]``.
+
+        Returns:
+            One-dimensional tensor of scalar risk scores.
+        """
+
         features = self.image_encoder(x)
         return self.risk_head(features).squeeze(-1)
 
 
 def get_last_scan(engine: Engine | None = None) -> pl.DataFrame:
-    """Load one eligible pre-event/censoring image and outcome per patient."""
+    """Load the latest valid MRI and outcome metadata for every patient.
+
+    The query joins the existing patient-level split and ranks valid MRIs by
+    descending acquisition date and image identifier, retaining one row per
+    patient.
+
+    Args:
+        engine: Optional SQLAlchemy engine. If ``None``, uses the project
+            database engine.
+
+    Returns:
+        Polars frame containing selected images, diagnoses, outcomes,
+        censoring status, and split assignments.
+    """
 
     query = """
         WITH eligible_images AS (
@@ -179,7 +271,15 @@ def get_last_scan(engine: Engine | None = None) -> pl.DataFrame:
 
 
 def validate_last_scan(df: pl.DataFrame) -> bool:
-    """Return whether the frame satisfies the one-row-per-patient contract."""
+    """Check whether a last-scan frame satisfies the modeling contract.
+
+    Args:
+        df: Candidate patient-level frame.
+
+    Returns:
+        ``True`` when required columns are complete, patient identifiers are
+        unique, and all split labels are recognized; otherwise ``False``.
+    """
 
     required = {
         "image_id",
@@ -200,7 +300,15 @@ def validate_last_scan(df: pl.DataFrame) -> bool:
 
 
 def df_transform(df: pl.DataFrame) -> pl.DataFrame:
-    """Add the event indicator and normalize validation split naming."""
+    """Add modeling columns and normalize validation split naming.
+
+    Args:
+        df: Valid patient-level last-scan frame.
+
+    Returns:
+        Frame with ``event_observed`` and ``is_ad`` indicators and lowercase
+        split names, with ``"val"`` normalized to ``"validation"``.
+    """
 
     return df.with_columns(
         (~pl.col("is_censored")).cast(pl.Boolean).alias("event_observed"),
@@ -213,7 +321,20 @@ def df_transform(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def build_patient_records(df: pl.DataFrame, tensor_dir: Path) -> list[PatientRecord]:
-    """Build and validate the immutable patient-level modeling cohort."""
+    """Build and validate the immutable patient-level modeling cohort.
+
+    Args:
+        df: One-row-per-patient last-scan frame.
+        tensor_dir: Directory containing patient tensor packages.
+
+    Returns:
+        Validated patient records across train, validation, and test splits.
+
+    Raises:
+        FileNotFoundError: If any expected patient tensor package is missing.
+        ValueError: If the frame contract is invalid, survival times are
+            negative, a split is empty, or a split has no observed events.
+    """
 
     if not validate_last_scan(df):
         raise ValueError("Last-scan data must contain one complete row per patient and valid split labels")
@@ -258,20 +379,49 @@ def build_patient_records(df: pl.DataFrame, tensor_dir: Path) -> list[PatientRec
 
 
 class SingleImageSurvivalDataset(Dataset[dict[str, Any]]):
-    """Lazily load the selected MRI from each longitudinal patient tensor."""
+    """Lazily load and preprocess one selected MRI per patient."""
 
     def __init__(
         self,
         records: Sequence[PatientRecord],
         spatial_size: tuple[int, int, int] | None = (96, 112, 96),
     ):
+        """Initialize the single-image dataset.
+
+        Args:
+            records: Patient records defining selected images and outcomes.
+            spatial_size: Optional ``(depth, height, width)`` target for
+                trilinear resizing.
+        """
+
         self.records = list(records)
         self.spatial_size = spatial_size
 
     def __len__(self) -> int:
+        """Return the number of patient observations."""
+
         return len(self.records)
 
     def __getitem__(self, index: int) -> dict[str, Any]:
+        """Load and standardize one patient's selected MRI.
+
+        The method memory-maps a weights-only tensor package, locates the
+        selected image, optionally resizes it, and standardizes the complete
+        volume to zero mean and unit variance.
+
+        Args:
+            index: Positional patient-record index.
+
+        Returns:
+            Mapping containing the image tensor, outcome, dataset index,
+            patient identifier, and image identifier.
+
+        Raises:
+            ValueError: If the tensor package belongs to another patient,
+                omits the selected image, or contains an MRI with an invalid
+                shape.
+        """
+
         record = self.records[index]
         package = torch.load(record.tensor_path, map_location="cpu", weights_only=True, mmap=True)
 
@@ -311,12 +461,26 @@ class SingleImageSurvivalDataset(Dataset[dict[str, Any]]):
 
 
 class BaselineResultStore:
-    """Persist reproducible baseline run results in Postgres."""
+    """Persist legacy baseline run artifacts in PostgreSQL."""
 
     def __init__(self, engine: Engine):
+        """Initialize the legacy result store.
+
+        Args:
+            engine: SQLAlchemy engine connected to the project PostgreSQL
+                database.
+        """
+
         self.engine = engine
 
     def ensure_schema(self) -> None:
+        """Create legacy baseline tables when they do not already exist.
+
+        The operation creates ``_ml.baseline_runs``,
+        ``_ml.baseline_run_patients``, ``_ml.baseline_epoch_metrics``, and
+        ``_ml.baseline_test_predictions`` without modifying existing rows.
+        """
+
         statements = [
             "CREATE SCHEMA IF NOT EXISTS _ml",
             """
@@ -389,6 +553,16 @@ class BaselineResultStore:
         checkpoint_dir: Path,
         records: Sequence[PatientRecord],
     ) -> None:
+        """Create a running experiment and persist its patient cohort.
+
+        Args:
+            run_id: Unique identifier for the baseline run.
+            config: Training configuration serialized as JSON.
+            device: PyTorch device used for the run.
+            checkpoint_dir: Directory assigned to run checkpoints.
+            records: Exact patient records used across all splits.
+        """
+
         counts = {split: sum(record.split == split for record in records) for split in SPLIT_NAMES}
         event_counts = {
             split: sum(record.split == split and record.event_observed for record in records)
@@ -457,6 +631,19 @@ class BaselineResultStore:
         learning_rate: float,
         checkpoint_path: Path,
     ) -> None:
+        """Persist training and validation measurements for one epoch.
+
+        Args:
+            run_id: Identifier of the model run.
+            epoch: One-based epoch number.
+            train_loss: Full-cohort training Cox loss.
+            train_c_index: Training Harrell C-index.
+            validation_loss: Full-cohort validation Cox loss.
+            validation_c_index: Validation Harrell C-index.
+            learning_rate: Optimizer learning rate.
+            checkpoint_path: Checkpoint saved for the epoch.
+        """
+
         with self.engine.begin() as connection:
             connection.execute(
                 text(
@@ -483,6 +670,13 @@ class BaselineResultStore:
             )
 
     def record_test_predictions(self, run_id: str, predictions: PredictionBundle) -> None:
+        """Persist patient-level test risks and outcomes.
+
+        Args:
+            run_id: Identifier of the evaluated run.
+            predictions: Aligned test predictions and patient metadata.
+        """
+
         rows = [
             {
                 "run_id": run_id,
@@ -522,6 +716,15 @@ class BaselineResultStore:
         best_validation_loss: float,
         test_c_index: float,
     ) -> None:
+        """Mark a run completed and store its selected results.
+
+        Args:
+            run_id: Identifier of the completed run.
+            best_epoch: Epoch selected by minimum validation loss.
+            best_validation_loss: Lowest observed validation Cox loss.
+            test_c_index: Test C-index produced by the selected checkpoint.
+        """
+
         with self.engine.begin() as connection:
             connection.execute(
                 text(
@@ -541,6 +744,14 @@ class BaselineResultStore:
             )
 
     def fail_run(self, run_id: str, error_message: str) -> None:
+        """Mark a run failed and persist a bounded error description.
+
+        Args:
+            run_id: Identifier of the failed run.
+            error_message: Failure description. Only the first 10,000
+                characters are stored.
+        """
+
         with self.engine.begin() as connection:
             connection.execute(
                 text(
@@ -555,6 +766,20 @@ class BaselineResultStore:
 
 
 def _resolve_device(requested_device: str) -> torch.device:
+    """Resolve a requested training device.
+
+    Automatic selection prefers CUDA, then Apple MPS, and finally CPU.
+
+    Args:
+        requested_device: PyTorch device string or ``"auto"``.
+
+    Returns:
+        Resolved PyTorch device.
+
+    Raises:
+        ValueError: If CUDA is requested but unavailable.
+    """
+
     if requested_device == "auto":
         if torch.cuda.is_available():
             return torch.device("cuda")
@@ -568,6 +793,12 @@ def _resolve_device(requested_device: str) -> torch.device:
 
 
 def _seed_everything(seed: int) -> None:
+    """Seed random generators and request deterministic cuDNN behavior.
+
+    Args:
+        seed: Seed applied to Python, PyTorch, and every available CUDA device.
+    """
+
     random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -582,6 +813,20 @@ def _make_loader(
     config: TrainingConfig,
     device: torch.device,
 ) -> DataLoader[dict[str, Any]]:
+    """Build a deterministic single-image data loader.
+
+    Record order is preserved so dataset indices can align full-risk-set score
+    gradients with the second mini-batch training pass.
+
+    Args:
+        records: Patient records for one data split.
+        config: Batch, worker, and preprocessing configuration.
+        device: Device used to determine whether pinned memory is beneficial.
+
+    Returns:
+        Deterministically ordered single-image data loader.
+    """
+
     dataset = SingleImageSurvivalDataset(records, spatial_size=config.spatial_size)
     return DataLoader(
         dataset,
@@ -598,6 +843,23 @@ def collect_predictions(
     loader: DataLoader[dict[str, Any]],
     device: torch.device,
 ) -> PredictionBundle:
+    """Collect scalar Cox risks without retaining gradients.
+
+    The function preserves the model's current training or evaluation mode and
+    returns prediction tensors on the CPU.
+
+    Args:
+        model: Model producing one risk score per MRI.
+        loader: Single-image data loader.
+        device: Device receiving image batches.
+
+    Returns:
+        Concatenated risks, outcomes, dataset indices, and identifiers.
+
+    Raises:
+        ValueError: If the loader yields no observations.
+    """
+
     risks: list[torch.Tensor] = []
     times: list[torch.Tensor] = []
     events: list[torch.Tensor] = []
@@ -641,6 +903,20 @@ def train_one_epoch(
     small MRI batches and backpropagates those score derivatives through the
     CNN.  This avoids the biased risk sets and event-free batches produced by
     ordinary mini-batch Cox training.
+
+    Args:
+        model: Cox risk model to optimize.
+        loader: Deterministically ordered training loader.
+        optimizer: Optimizer updated after score-gradient recomputation.
+        device: Device receiving each image batch.
+        gradient_clip_norm: Maximum parameter-gradient norm. Values less than
+            or equal to zero disable clipping.
+
+    Returns:
+        A tuple containing full-risk-set Cox loss and training C-index.
+
+    Raises:
+        ValueError: If prediction collection or Cox loss validation fails.
     """
 
     model.train()
@@ -673,6 +949,20 @@ def evaluate(
     loader: DataLoader[dict[str, Any]],
     device: torch.device,
 ) -> tuple[float, float, PredictionBundle]:
+    """Evaluate a Cox model on one complete data split.
+
+    Args:
+        model: Cox risk model to evaluate.
+        loader: Single-image data loader for one split.
+        device: Device receiving each image batch.
+
+    Returns:
+        A tuple containing Cox loss, Harrell C-index, and aligned predictions.
+
+    Raises:
+        ValueError: If the loader is empty or Cox inputs are invalid.
+    """
+
     model.eval()
     predictions = collect_predictions(model, loader, device)
     loss = cox_ph_loss(predictions.risks, predictions.times, predictions.events)
@@ -689,6 +979,21 @@ def save_checkpoint(
     config: TrainingConfig,
     metrics: dict[str, float],
 ) -> None:
+    """Atomically save model, optimizer, configuration, and epoch metrics.
+
+    The checkpoint is written to a sibling temporary file before replacement
+    into the final path.
+
+    Args:
+        checkpoint_path: Final checkpoint destination.
+        run_id: Identifier of the experiment run.
+        epoch: Epoch represented by the checkpoint.
+        model: Baseline model whose state is saved.
+        optimizer: Optimizer whose state is saved.
+        config: Training configuration serialized into the checkpoint.
+        metrics: Training and validation metrics for the epoch.
+    """
+
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = checkpoint_path.with_suffix(checkpoint_path.suffix + ".tmp")
     torch.save(
@@ -706,7 +1011,33 @@ def save_checkpoint(
 
 
 def run_training(config: TrainingConfig, engine: Engine | None = None) -> str:
-    """Train, validate, test, checkpoint, and persist one baseline run."""
+    """Train, validate, test, checkpoint, and persist one legacy baseline run.
+
+    The function queries one selected MRI per patient, validates tensor and
+    split availability, and trains with the exact full-risk-set Cox objective.
+    Every epoch is checkpointed and written to the legacy baseline result
+    tables. The checkpoint with minimum validation Cox loss is restored for
+    final test evaluation.
+
+    Args:
+        config: Baseline training, loading, and checkpoint configuration.
+        engine: Optional SQLAlchemy engine. If ``None``, uses the project
+            database engine.
+
+    Returns:
+        Unique identifier of the completed baseline run.
+
+    Raises:
+        FileNotFoundError: If an expected patient tensor package is missing.
+        ValueError: If configuration, cohort, loader, or Cox-loss validation
+            fails.
+        RuntimeError: If training does not produce a selectable checkpoint.
+
+    Note:
+        Exceptions raised after run creation attempt to mark the persisted run
+        as failed. If that persistence update also fails, its error is attached
+        as a note to the original exception.
+    """
 
     config.validate()
     _seed_everything(config.seed)
@@ -815,6 +1146,16 @@ def run_training(config: TrainingConfig, engine: Engine | None = None) -> str:
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments for a legacy baseline run.
+
+    Args:
+        argv: Optional argument sequence. ``None`` reads arguments from the
+            current process.
+
+    Returns:
+        Parsed command-line namespace.
+    """
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=2)
@@ -838,6 +1179,16 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> str:
+    """Run legacy baseline training from command-line arguments.
+
+    Args:
+        argv: Optional argument sequence. ``None`` reads arguments from the
+            current process.
+
+    Returns:
+        Unique identifier of the completed baseline run.
+    """
+
     args = _parse_args(argv)
     config = TrainingConfig(
         epochs=args.epochs,

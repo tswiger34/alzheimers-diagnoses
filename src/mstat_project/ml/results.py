@@ -1,4 +1,10 @@
-"""Unified Postgres persistence for baseline and LTSA experiments."""
+"""Persist baseline and LTSA survival experiments in a unified PostgreSQL schema.
+
+The module stores run metadata, per-epoch metrics, exact landmark-cohort
+membership, patient-level test predictions, and paired C-index comparisons in
+the ``_ml`` schema. Each public write method executes within its own database
+transaction.
+"""
 
 import json
 from dataclasses import asdict, dataclass
@@ -15,6 +21,26 @@ type ModelType = Literal["baseline", "ltsa"]
 
 @dataclass(frozen=True)
 class EpochMetrics:
+    """Training and validation measurements persisted for one epoch.
+
+    Attributes:
+        epoch: One-based training epoch number.
+        train_total_loss: Total objective averaged over the training cohort.
+        train_survival_loss: Survival component of the training objective.
+        train_auxiliary_loss: Auxiliary training loss, or ``None`` for models
+            without an auxiliary objective.
+        train_c_index: Training Harrell C-index.
+        validation_total_loss: Total objective averaged over the validation
+            cohort.
+        validation_survival_loss: Survival component of the validation
+            objective.
+        validation_auxiliary_loss: Auxiliary validation loss, or ``None`` for
+            models without an auxiliary objective.
+        validation_c_index: Validation Harrell C-index.
+        learning_rate: Optimizer learning rate recorded after the epoch.
+        checkpoint_path: Filesystem path to the checkpoint saved for the epoch.
+    """
+
     epoch: int
     train_total_loss: float
     train_survival_loss: float
@@ -30,6 +56,19 @@ class EpochMetrics:
 
 @dataclass(frozen=True)
 class PredictionRecord:
+    """Patient-level prediction persisted for a completed test evaluation.
+
+    Attributes:
+        ptid: Patient identifier.
+        image_ids: Chronological image history supplied by the landmark cohort.
+        observed_time_months: Event or censoring time measured from the
+            landmark.
+        event_observed: Whether the modeled event was observed.
+        risk_score: Scalar model risk used for concordance evaluation.
+        survival_curve: Discrete LTSA survival probabilities, or ``None`` for
+            models that produce only a scalar risk.
+    """
+
     ptid: str
     image_ids: tuple[str, ...]
     observed_time_months: float
@@ -39,10 +78,27 @@ class PredictionRecord:
 
 
 class SurvivalResultStore:
+    """Store survival experiment artifacts using a SQLAlchemy PostgreSQL engine."""
+
     def __init__(self, engine: Engine) -> None:
+        """Initialize the result store.
+
+        Args:
+            engine: SQLAlchemy engine connected to the project PostgreSQL
+                database.
+        """
+
         self.engine = engine
 
     def ensure_schema(self) -> None:
+        """Create the unified survival schema and tables when they do not exist.
+
+        The operation creates ``_ml.survival_runs``,
+        ``_ml.survival_epoch_metrics``, ``_ml.survival_run_patients``, and
+        ``_ml.survival_test_predictions``. Existing tables and rows are left
+        unchanged.
+        """
+
         statements = [
             "CREATE SCHEMA IF NOT EXISTS _ml",
             """
@@ -133,6 +189,29 @@ class SurvivalResultStore:
         checkpoint_dir: Path,
         records: list[LandmarkPatientRecord],
     ) -> None:
+        """Create a running experiment and persist its exact landmark cohort.
+
+        Patient and observed-event counts are derived from ``records`` for each
+        train, validation, and test split. The run row and all cohort-membership
+        rows are inserted in one transaction.
+
+        Args:
+            run_id: Unique identifier for the model run.
+            comparison_id: Identifier shared by matched baseline and LTSA runs.
+            model_type: Model family, either ``"baseline"`` or ``"ltsa"``.
+            landmark_months: Fixed prediction landmark measured from baseline.
+            config: Training configuration. Dataclass instances are converted
+                to dictionaries before JSON serialization.
+            device: PyTorch device used for the run.
+            checkpoint_dir: Existing directory that will contain run
+                checkpoints.
+            records: Validated patient records defining the exact landmark
+                cohort and image histories.
+
+        Raises:
+            FileNotFoundError: If ``checkpoint_dir`` does not exist.
+        """
+
         counts = {
             split: sum(record.split == split for record in records) for split in ("train", "validation", "test")
         }
@@ -203,6 +282,17 @@ class SurvivalResultStore:
             )
 
     def record_epoch(self, run_id: str, metrics: EpochMetrics) -> None:
+        """Persist metrics and the checkpoint location for one epoch.
+
+        Args:
+            run_id: Identifier of the run that produced the epoch.
+            metrics: Training and validation metrics to insert.
+
+        Raises:
+            FileNotFoundError: If the checkpoint referenced by ``metrics`` is
+                not a file.
+        """
+
         if not metrics.checkpoint_path.is_file():
             raise FileNotFoundError(f"Checkpoint does not exist: {metrics.checkpoint_path}")
         values = asdict(metrics)
@@ -228,6 +318,14 @@ class SurvivalResultStore:
             )
 
     def record_predictions(self, run_id: str, predictions: list[PredictionRecord]) -> None:
+        """Persist patient-level predictions for a run's test split.
+
+        Args:
+            run_id: Identifier of the evaluated run.
+            predictions: Test predictions to insert. Image histories and
+                optional survival curves are stored as JSON.
+        """
+
         with self.engine.begin() as connection:
             connection.execute(
                 text(
@@ -264,6 +362,16 @@ class SurvivalResultStore:
         best_validation_c_index: float,
         test_c_index: float,
     ) -> None:
+        """Mark a run complete and store checkpoint-selection results.
+
+        Args:
+            run_id: Identifier of the completed run.
+            best_epoch: Epoch selected by validation performance.
+            best_validation_loss: Validation loss at the selected epoch.
+            best_validation_c_index: Validation C-index at the selected epoch.
+            test_c_index: Test C-index produced by the selected checkpoint.
+        """
+
         with self.engine.begin() as connection:
             connection.execute(
                 text(
@@ -294,6 +402,22 @@ class SurvivalResultStore:
         confidence_interval_low: float,
         confidence_interval_high: float,
     ) -> None:
+        """Store a paired LTSA-minus-baseline C-index comparison.
+
+        The comparison values are written to every run with the matching
+        ``comparison_id`` and landmark, normally the paired baseline and LTSA
+        rows.
+
+        Args:
+            comparison_id: Identifier shared by the paired model runs.
+            landmark_months: Landmark whose paired result is being recorded.
+            difference: LTSA test C-index minus baseline test C-index.
+            confidence_interval_low: Lower bound of the paired bootstrap
+                confidence interval.
+            confidence_interval_high: Upper bound of the paired bootstrap
+                confidence interval.
+        """
+
         with self.engine.begin() as connection:
             connection.execute(
                 text(
@@ -315,6 +439,14 @@ class SurvivalResultStore:
             )
 
     def fail_run(self, run_id: str, error_message: str) -> None:
+        """Mark a run failed and persist a bounded error description.
+
+        Args:
+            run_id: Identifier of the failed run.
+            error_message: Failure description. Only the first 10,000
+                characters are stored.
+        """
+
         with self.engine.begin() as connection:
             connection.execute(
                 text(

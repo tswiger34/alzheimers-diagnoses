@@ -1,4 +1,10 @@
-"""Train LTSA on a fixed-landmark longitudinal MRI cohort."""
+"""Train and evaluate LTSA on a fixed-landmark longitudinal MRI cohort.
+
+The module builds split-specific sequence loaders, optimizes discrete survival
+and next-visit feature objectives, selects checkpoints using validation
+concordance, evaluates the selected model on the test split, and persists the
+complete run through the unified survival result store.
+"""
 
 import argparse
 import logging
@@ -37,6 +43,36 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class LTSATrainingConfig:
+    """Configuration for one fixed-landmark LTSA experiment.
+
+    Attributes:
+        landmark_months: Prediction landmark measured in months from the
+            baseline image.
+        epochs: Maximum number of training epochs.
+        patience: Consecutive non-improving validation epochs allowed before
+            early stopping.
+        batch_size: Number of patient sequences per mini-batch.
+        learning_rate: AdamW learning rate.
+        weight_decay: AdamW weight-decay coefficient.
+        gradient_clip_norm: Maximum gradient norm. Set to ``0`` to disable
+            clipping.
+        bin_width_months: Width of each discrete survival interval in months.
+        censoring_beta: Weighting parameter for the discrete censoring NLL.
+        auxiliary_loss_weight: Multiplier applied to next-visit feature MSE.
+        n_heads: Number of Transformer attention heads.
+        n_layers: Number of causal Transformer encoder layers.
+        dropout: Dropout probability used by LTSA.
+        seed: Seed used for Python, PyTorch, CUDA, and data-loader shuffling.
+        num_workers: Worker processes assigned to each data loader.
+        device: PyTorch device specification, or ``"auto"`` to prefer CUDA,
+            then MPS, then CPU.
+        pretrained: Whether to initialize ResNet-101 with ImageNet weights.
+        tensor_dir: Directory containing patient tensor packages.
+        checkpoint_root: Root directory for run-specific checkpoints.
+        spatial_size: Optional ``(depth, height, width)`` used to resize MRI
+            volumes. ``None`` preserves stored dimensions.
+    """
+
     landmark_months: float
     epochs: int = 50
     patience: int = 10
@@ -59,6 +95,15 @@ class LTSATrainingConfig:
     spatial_size: tuple[int, int, int] | None = (96, 112, 96)
 
     def validate(self) -> None:
+        """Validate training, optimization, and architecture settings.
+
+        Raises:
+            ValueError: If the landmark or optimizer settings are out of
+                range, loss weights are invalid, worker or architecture
+                counts are invalid, or ``n_heads`` does not divide the
+                ResNet-101 feature width.
+        """
+
         if self.landmark_months < 0:
             raise ValueError("landmark_months cannot be negative")
         if self.epochs < 1 or self.patience < 1 or self.batch_size < 1:
@@ -79,6 +124,17 @@ class LTSATrainingConfig:
 
 @dataclass(frozen=True)
 class LTSALossBundle:
+    """Differentiable losses and survival outputs for one batch.
+
+    Attributes:
+        total: Weighted sum of survival and auxiliary losses.
+        survival: Discrete negative log-likelihood at each patient's final
+            valid visit.
+        auxiliary: Mean squared error over valid next-visit feature targets.
+        risk: Scalar risk derived from negative restricted mean survival time.
+        survival_curves: Final-visit discrete survival curve for each patient.
+    """
+
     total: Tensor
     survival: Tensor
     auxiliary: Tensor
@@ -88,6 +144,17 @@ class LTSALossBundle:
 
 @dataclass(frozen=True)
 class LTSAPredictionBundle:
+    """Aligned test predictions, outcomes, and patient metadata.
+
+    Attributes:
+        risks: One scalar risk score per patient.
+        times: Landmark-relative event or censoring times.
+        events: Boolean event indicators.
+        survival_curves: Discrete final-visit survival curves.
+        ptids: Patient identifiers in tensor row order.
+        image_ids: Chronological image histories corresponding to each patient.
+    """
+
     risks: Tensor
     times: Tensor
     events: Tensor
@@ -98,6 +165,17 @@ class LTSAPredictionBundle:
 
 @dataclass(frozen=True)
 class LTSARunResult:
+    """Summary and patient predictions returned by a completed LTSA run.
+
+    Attributes:
+        run_id: Unique identifier for the LTSA model run.
+        comparison_id: Identifier shared with a matched baseline run.
+        best_epoch: Epoch selected by validation performance.
+        validation_c_index: Validation C-index at the selected epoch.
+        test_c_index: Test C-index from the selected checkpoint.
+        predictions: Patient-level test predictions and outcomes.
+    """
+
     run_id: str
     comparison_id: str
     best_epoch: int
@@ -107,6 +185,20 @@ class LTSARunResult:
 
 
 def resolve_device(requested_device: str) -> torch.device:
+    """Resolve a requested training device.
+
+    Automatic selection prefers CUDA, then Apple MPS, and finally CPU.
+
+    Args:
+        requested_device: PyTorch device string or ``"auto"``.
+
+    Returns:
+        Resolved PyTorch device.
+
+    Raises:
+        ValueError: If CUDA is requested but unavailable.
+    """
+
     if requested_device == "auto":
         if torch.cuda.is_available():
             return torch.device("cuda")
@@ -120,6 +212,12 @@ def resolve_device(requested_device: str) -> torch.device:
 
 
 def seed_everything(seed: int) -> None:
+    """Seed random generators and request deterministic cuDNN behavior.
+
+    Args:
+        seed: Seed applied to Python, PyTorch, and every available CUDA device.
+    """
+
     random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -135,6 +233,22 @@ def make_landmark_loaders(
     config: LTSATrainingConfig,
     device: torch.device,
 ) -> dict[str, DataLoader]:
+    """Build train, validation, and test sequence loaders.
+
+    Training sequences are shuffled with a seeded generator. Validation and
+    test order remain deterministic. CUDA runs enable pinned host memory, and
+    worker processes remain persistent when ``num_workers`` is positive.
+
+    Args:
+        records: Preflighted landmark-cohort records across all data splits.
+        config: LTSA data-loading and preprocessing configuration.
+        device: Device used to determine whether pinned memory is beneficial.
+
+    Returns:
+        A mapping containing ``"train"``, ``"validation"``, and ``"test"``
+        data loaders.
+    """
+
     loaders: dict[str, DataLoader] = {}
     for split in ("train", "validation", "test"):
         split_records = [record for record in records if record.split == split]
@@ -153,6 +267,17 @@ def make_landmark_loaders(
 
 
 def _last_visit(values: Tensor, sequence_lengths: Tensor) -> Tensor:
+    """Select each patient's final valid visit from a padded tensor.
+
+    Args:
+        values: Tensor whose first dimensions are ``[batch, visits]``.
+        sequence_lengths: Number of valid visits for each batch row.
+
+    Returns:
+        Tensor containing one selected visit per patient and preserving all
+        dimensions after ``visits``.
+    """
+
     return values[torch.arange(values.shape[0], device=values.device), sequence_lengths - 1]
 
 
@@ -164,6 +289,26 @@ def compute_ltsa_loss(
     censoring_beta: float,
     auxiliary_loss_weight: float,
 ) -> LTSALossBundle:
+    """Compute LTSA survival, auxiliary, and total objectives.
+
+    Survival NLL is evaluated from hazards at each patient's final valid
+    landmark visit. Censoring indicators are obtained by negating the batch
+    event flags. Auxiliary MSE includes only visits with a valid subsequent
+    visit; batches without such pairs receive a differentiable zero auxiliary
+    loss.
+
+    Args:
+        outputs: Visit-level LTSA predictions and validity masks.
+        batch: Landmark batch containing outcomes and sequence lengths.
+        grid: Discrete time grid used to encode outcomes and convert survival
+            curves to risk.
+        censoring_beta: Censoring NLL weighting parameter.
+        auxiliary_loss_weight: Multiplier applied to auxiliary feature MSE in
+            the total loss.
+
+    Returns:
+        Batch losses, scalar risks, and final-visit survival curves.
+    """
     last_hazards = _last_visit(outputs.hazards, batch.sequence_lengths)
     last_survival = _last_visit(outputs.surv, batch.sequence_lengths)
     survival_loss = nll_loss(
@@ -198,6 +343,28 @@ def _run_epoch(
     device: torch.device,
     optimizer: torch.optim.Optimizer | None,
 ) -> tuple[float, float, float, float]:
+    """Run one training or evaluation epoch.
+
+    Supplying an optimizer enables gradients, parameter updates, and optional
+    gradient clipping. Passing ``None`` evaluates the model without gradients.
+    Losses are averaged by patient count rather than batch count.
+
+    Args:
+        model: LTSA model to train or evaluate.
+        loader: Landmark sequence data loader for one split.
+        grid: Discrete time grid fitted on the training cohort.
+        config: Loss and gradient-clipping configuration.
+        device: Device receiving each collated batch.
+        optimizer: Optimizer used for training, or ``None`` for evaluation.
+
+    Returns:
+        A tuple containing mean total loss, mean survival loss, mean auxiliary
+        loss, and Harrell C-index, in that order.
+
+    Raises:
+        ValueError: If the data loader yields no patients.
+    """
+
     training = optimizer is not None
     model.train(training)
     total_loss_sum = 0.0
@@ -258,6 +425,26 @@ def collect_ltsa_predictions(
     *,
     device: torch.device,
 ) -> LTSAPredictionBundle:
+    """Collect final-visit LTSA predictions without gradients.
+
+    The model is placed in evaluation mode. Survival curves and scalar risks
+    are taken from each patient's final valid visit and returned on the CPU
+    alongside aligned outcomes and identifiers.
+
+    Args:
+        model: Trained LTSA model.
+        loader: Landmark sequence loader to evaluate.
+        grid: Discrete time grid used to convert survival curves to risk.
+        device: Device receiving each collated batch.
+
+    Returns:
+        Concatenated risks, outcomes, survival curves, patient identifiers, and
+        image histories.
+
+    Raises:
+        ValueError: If the data loader yields no predictions.
+    """
+
     model.eval()
     risks: list[Tensor] = []
     times: list[Tensor] = []
@@ -303,6 +490,23 @@ def save_ltsa_checkpoint(
     grid: DiscreteTimeGrid,
     metrics: EpochMetrics,
 ) -> None:
+    """Atomically save model, optimizer, configuration, grid, and metrics.
+
+    The checkpoint is first written to a sibling temporary file and then
+    replaced into its final path, reducing the chance of leaving a partially
+    written checkpoint after interruption.
+
+    Args:
+        checkpoint_path: Final checkpoint destination.
+        run_id: Identifier of the experiment run.
+        epoch: Epoch represented by the checkpoint.
+        model: LTSA model whose state is saved.
+        optimizer: Optimizer whose state is saved.
+        config: Training configuration serialized into the checkpoint.
+        grid: Fitted discrete time grid.
+        metrics: Training and validation measurements for the epoch.
+    """
+
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = checkpoint_path.with_suffix(checkpoint_path.suffix + ".tmp")
     torch.save(
@@ -327,6 +531,43 @@ def run_training(
     comparison_id: str | None = None,
     cohort_records: list[LandmarkPatientRecord] | None = None,
 ) -> LTSARunResult:
+    """Train, select, evaluate, and persist one fixed-landmark LTSA run.
+
+    When no cohort is supplied, the function queries and validates one from
+    the project database. A supplied cohort allows paired orchestration to
+    reuse the exact records preflighted for the baseline. The discrete grid is
+    fitted only on training durations.
+
+    Every epoch is checkpointed and persisted. Selection maximizes validation
+    C-index and uses validation total loss to break C-index ties. Training
+    stops after ``patience`` consecutive non-improving epochs. The selected
+    checkpoint is restored before test prediction and persistence.
+
+    Args:
+        config: Validated experiment, architecture, and data configuration.
+        engine: Optional SQLAlchemy engine. If ``None``, uses the project
+            database engine.
+        comparison_id: Optional identifier shared with a matched baseline.
+            A new identifier is generated when omitted.
+        cohort_records: Optional preflighted landmark cohort. Every record must
+            match ``config.landmark_months``.
+
+    Returns:
+        Run identifiers, selected epoch, validation and test C-indices, and
+        patient-level test predictions.
+
+    Raises:
+        ValueError: If configuration or cohort validation fails, the supplied
+            cohort uses a different landmark, or an epoch loader is empty.
+        FileExistsError: If the generated run checkpoint directory already
+            exists.
+        RuntimeError: If training does not produce a selectable checkpoint.
+
+    Note:
+        Exceptions raised after the run row is created mark that row as
+        failed before the original exception is re-raised.
+    """
+
     config.validate()
     seed_everything(config.seed)
     device = resolve_device(config.device)
@@ -502,6 +743,16 @@ def run_training(
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments for a standalone LTSA run.
+
+    Args:
+        argv: Optional argument sequence. ``None`` reads arguments from the
+            current process.
+
+    Returns:
+        Parsed command-line namespace.
+    """
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--landmark-months", type=float, required=True)
     parser.add_argument("--epochs", type=int, default=50)
@@ -527,6 +778,16 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> str:
+    """Run LTSA training from command-line arguments.
+
+    Args:
+        argv: Optional argument sequence. ``None`` reads arguments from the
+            current process.
+
+    Returns:
+        Unique identifier of the completed LTSA run.
+    """
+
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = _parse_args(argv)
     result = run_training(

@@ -1,4 +1,10 @@
-"""Run paired fixed-landmark baseline and LTSA experiments."""
+"""Run paired fixed-landmark baseline and LTSA experiments.
+
+The module preflights every configured landmark before training, runs a
+single-MRI Cox baseline and LTSA on identical frozen patient cohorts, verifies
+patient-level test alignment, and persists paired bootstrap comparisons of
+test C-indices.
+"""
 
 import argparse
 import logging
@@ -10,16 +16,16 @@ from typing import Sequence
 import torch
 from sqlalchemy import Engine
 
+from mstat_project.ml.landmark_baseline import (
+    BaselineLandmarkTrainingConfig,
+    BaselineRunResult,
+    run_baseline_landmark_training,
+)
 from mstat_project.ml.landmarks import (
     LandmarkCohortConfig,
     LandmarkPatientRecord,
     build_landmark_records,
     load_landmark_frame,
-)
-from mstat_project.ml.landmark_baseline import (
-    BaselineLandmarkTrainingConfig,
-    BaselineRunResult,
-    run_baseline_landmark_training,
 )
 from mstat_project.ml.ltsa import LTSARunResult, LTSATrainingConfig, run_training
 from mstat_project.ml.metrics import PairedCIndexComparison, paired_c_index_difference
@@ -32,6 +38,35 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ComparisonConfig:
+    """Configuration shared by all models and landmarks in one comparison.
+
+    Attributes:
+        landmarks_months: Distinct prediction landmarks measured from each
+            patient's baseline image.
+        epochs: Maximum epochs for each model run.
+        patience: Consecutive non-improving validation epochs allowed before
+            early stopping.
+        batch_size: Patient sequences processed per mini-batch.
+        learning_rate: AdamW learning rate for both models.
+        weight_decay: AdamW weight-decay coefficient for both models.
+        gradient_clip_norm: Maximum gradient norm for both models.
+        bin_width_months: Width of LTSA discrete survival intervals.
+        censoring_beta: LTSA censoring NLL weighting parameter.
+        auxiliary_loss_weight: Weight applied to LTSA next-visit feature MSE.
+        n_heads: Number of LTSA Transformer attention heads.
+        n_layers: Number of LTSA Transformer encoder layers.
+        dropout: LTSA dropout probability.
+        bootstrap_samples: Requested paired patient-bootstrap replicates.
+        seed: Shared seed for training, loading, and bootstrap sampling.
+        num_workers: Worker processes assigned to each data loader.
+        device: PyTorch device string, or ``"auto"`` for automatic selection.
+        pretrained: Whether both ResNet-101 encoders use ImageNet weights.
+        tensor_dir: Directory containing patient tensor packages.
+        checkpoint_root: Root directory for all comparison checkpoints.
+        spatial_size: Optional ``(depth, height, width)`` used to resize MRI
+            volumes. ``None`` preserves stored dimensions.
+    """
+
     landmarks_months: tuple[float, ...] = (0.0, 12.0, 24.0, 36.0)
     epochs: int = 50
     patience: int = 10
@@ -55,6 +90,14 @@ class ComparisonConfig:
     spatial_size: tuple[int, int, int] | None = (96, 112, 96)
 
     def validate(self) -> None:
+        """Validate landmarks and shared model settings.
+
+        Raises:
+            ValueError: If landmarks are missing, negative, or duplicated; if
+                training, optimizer, survival, architecture, bootstrap, worker,
+                or spatial settings are outside their valid ranges.
+        """
+
         if not self.landmarks_months or any(landmark < 0 for landmark in self.landmarks_months):
             raise ValueError("At least one non-negative landmark is required")
         if len(set(self.landmarks_months)) != len(self.landmarks_months):
@@ -79,6 +122,16 @@ class ComparisonConfig:
 
 @dataclass(frozen=True)
 class LandmarkComparisonResult:
+    """Completed paired result for one fixed landmark.
+
+    Attributes:
+        landmark_months: Prediction landmark represented by the result.
+        baseline: Completed single-MRI Cox run.
+        ltsa: Completed longitudinal Transformer run.
+        comparison: Paired LTSA-minus-baseline C-index estimate and confidence
+            interval.
+    """
+
     landmark_months: float
     baseline: BaselineRunResult
     ltsa: LTSARunResult
@@ -89,7 +142,21 @@ def preflight_comparison_cohorts(
     config: ComparisonConfig,
     engine: Engine,
 ) -> dict[float, list[LandmarkPatientRecord]]:
-    """Freeze and validate every landmark cohort before either model starts training."""
+    """Freeze and validate every cohort before either model starts training.
+
+    Args:
+        config: Comparison landmarks, tensor directory, and spatial settings.
+        engine: SQLAlchemy engine connected to the project database.
+
+    Returns:
+        Mapping from each configured landmark to its validated patient records.
+        The same list is subsequently supplied to both model trainers.
+
+    Raises:
+        FileNotFoundError: If any expected patient tensor package is missing.
+        ValueError: If any landmark cohort fails eligibility, split, event, or
+            survival-comparability validation.
+    """
 
     return {
         landmark_months: build_landmark_records(
@@ -108,6 +175,23 @@ def _align_predictions(
     baseline: BaselineRunResult,
     ltsa: LTSARunResult,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Align paired test predictions by patient identifier.
+
+    Patient rows are sorted by identifier after verifying that both runs
+    contain identical patient sets and exactly matching outcome tensors.
+
+    Args:
+        baseline: Completed baseline run with patient-level test predictions.
+        ltsa: Completed LTSA run with patient-level test predictions.
+
+    Returns:
+        Baseline risks, LTSA risks, observed times, and event indicators in a
+        common patient order.
+
+    Raises:
+        ValueError: If the model test cohorts contain different patients or
+            disagree on any patient's observed time or event indicator.
+    """
     baseline_by_ptid = {
         ptid: (risk, time, event)
         for ptid, risk, time, event in zip(
@@ -149,6 +233,36 @@ def run_comparison(
     *,
     engine: Engine | None = None,
 ) -> list[LandmarkComparisonResult]:
+    """Run matched baseline and LTSA experiments at every landmark.
+
+    All landmark cohorts are validated before the first model is initialized.
+    One comparison identifier is shared across every baseline and LTSA run in
+    the invocation. At each landmark, the baseline trains first, followed by
+    LTSA on the same immutable patient records.
+
+    Test predictions are aligned by patient identifier before calculating the
+    paired LTSA-minus-baseline C-index difference and 95% percentile bootstrap
+    interval. Comparison statistics are written back to both matching run
+    rows.
+
+    Args:
+        config: Shared comparison, training, model, and data configuration.
+        engine: Optional SQLAlchemy engine. If ``None``, uses the project
+            database engine.
+
+    Returns:
+        One completed paired result per configured landmark, preserving
+        ``config.landmarks_months`` order.
+
+    Raises:
+        FileNotFoundError: If cohort tensors or required checkpoints are
+            missing.
+        ValueError: If configuration, cohort preflight, patient alignment, or
+            bootstrap validation fails.
+        RuntimeError: If either model fails to produce a selectable
+            checkpoint.
+    """
+
     config.validate()
     database_engine = engine or get_db_engine()
     cohorts = preflight_comparison_cohorts(config, database_engine)
@@ -240,6 +354,16 @@ def run_comparison(
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments for a paired comparison.
+
+    Args:
+        argv: Optional argument sequence. ``None`` reads arguments from the
+            current process.
+
+    Returns:
+        Parsed command-line namespace.
+    """
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--landmarks", type=float, nargs="+", default=(0.0, 12.0, 24.0, 36.0))
     parser.add_argument("--epochs", type=int, default=50)
@@ -266,6 +390,16 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> list[LandmarkComparisonResult]:
+    """Run the paired benchmark from command-line arguments.
+
+    Args:
+        argv: Optional argument sequence. ``None`` reads arguments from the
+            current process.
+
+    Returns:
+        Completed paired results for all requested landmarks.
+    """
+
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = _parse_args(argv)
     return run_comparison(

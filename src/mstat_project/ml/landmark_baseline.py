@@ -1,4 +1,10 @@
-"""Train the shared single-MRI Cox baseline at a fixed landmark."""
+"""Train the shared single-MRI Cox baseline at a fixed landmark.
+
+The baseline uses the same preflighted patient cohort and MRI preprocessing as
+LTSA but supplies only each patient's latest eligible MRI to a ResNet-101 Cox
+risk model. Training evaluates the Cox objective over the complete split risk
+set while recomputing image activations in memory-bounded mini-batches.
+"""
 
 import math
 import random
@@ -31,6 +37,29 @@ from mstat_project.utils import get_db_engine
 
 @dataclass(frozen=True)
 class BaselineLandmarkTrainingConfig:
+    """Configuration for one fixed-landmark Cox baseline experiment.
+
+    Attributes:
+        landmark_months: Prediction landmark measured from the baseline image.
+        epochs: Maximum number of training epochs.
+        patience: Consecutive non-improving validation epochs allowed before
+            early stopping.
+        batch_size: Number of patients processed per ResNet mini-batch.
+        learning_rate: AdamW learning rate.
+        weight_decay: AdamW weight-decay coefficient.
+        gradient_clip_norm: Maximum gradient norm. Set to ``0`` to disable
+            clipping.
+        seed: Seed applied to Python, PyTorch, and CUDA random generators.
+        num_workers: Worker processes assigned to each data loader.
+        device: PyTorch device specification, or ``"auto"`` for automatic
+            selection.
+        pretrained: Whether to initialize ResNet-101 with ImageNet weights.
+        tensor_dir: Directory containing patient tensor packages.
+        checkpoint_root: Root directory for run-specific checkpoints.
+        spatial_size: Optional ``(depth, height, width)`` used to resize MRI
+            volumes. ``None`` preserves stored dimensions.
+    """
+
     landmark_months: float
     epochs: int = 50
     patience: int = 10
@@ -47,6 +76,14 @@ class BaselineLandmarkTrainingConfig:
     spatial_size: tuple[int, int, int] | None = (96, 112, 96)
 
     def validate(self) -> None:
+        """Validate landmark, optimization, and data-loader settings.
+
+        Raises:
+            ValueError: If the landmark is negative; epoch, patience, or batch
+                counts are not positive; optimizer values are out of range; or
+                ``num_workers`` is negative.
+        """
+
         if self.landmark_months < 0:
             raise ValueError("landmark_months cannot be negative")
         if self.epochs < 1 or self.patience < 1 or self.batch_size < 1:
@@ -59,6 +96,17 @@ class BaselineLandmarkTrainingConfig:
 
 @dataclass(frozen=True)
 class BaselinePredictionBundle:
+    """Aligned Cox predictions, outcomes, and patient metadata.
+
+    Attributes:
+        risks: Scalar Cox log-risk score for each patient.
+        times: Landmark-relative event or censoring times.
+        events: Boolean event indicators.
+        ptids: Patient identifiers in tensor row order.
+        image_ids: Full chronological image histories. The model uses the last
+            valid image in each history.
+    """
+
     risks: Tensor
     times: Tensor
     events: Tensor
@@ -68,6 +116,17 @@ class BaselinePredictionBundle:
 
 @dataclass(frozen=True)
 class BaselineRunResult:
+    """Summary and test predictions returned by a completed baseline run.
+
+    Attributes:
+        run_id: Unique identifier for the baseline model run.
+        comparison_id: Identifier shared with a matched LTSA run.
+        best_epoch: Epoch selected by validation performance.
+        validation_c_index: Validation C-index at the selected epoch.
+        test_c_index: Test C-index from the selected checkpoint.
+        predictions: Patient-level test predictions and outcomes.
+    """
+
     run_id: str
     comparison_id: str
     best_epoch: int
@@ -77,6 +136,12 @@ class BaselineRunResult:
 
 
 def _seed_everything(seed: int) -> None:
+    """Seed random generators and request deterministic cuDNN behavior.
+
+    Args:
+        seed: Seed applied to Python, PyTorch, and every available CUDA device.
+    """
+
     random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -92,6 +157,22 @@ def _make_loaders(
     config: BaselineLandmarkTrainingConfig,
     device: torch.device,
 ) -> dict[str, DataLoader]:
+    """Build deterministic train, validation, and test sequence loaders.
+
+    All splits preserve record order. Stable training order is required
+    because the exact full-risk-set Cox gradient is calculated first and then
+    consumed by a second mini-batch pass over the same patients.
+
+    Args:
+        records: Preflighted landmark records across all data splits.
+        config: Baseline loading and preprocessing configuration.
+        device: Device used to determine whether pinned memory is beneficial.
+
+    Returns:
+        A mapping containing ``"train"``, ``"validation"``, and ``"test"``
+        data loaders.
+    """
+
     return {
         split: DataLoader(
             LandmarkSequenceDataset(
@@ -110,6 +191,15 @@ def _make_loaders(
 
 
 def _selected_images(batch: LandmarkBatch) -> Tensor:
+    """Select the latest valid MRI from each padded patient sequence.
+
+    Args:
+        batch: Padded landmark batch with valid sequence lengths.
+
+    Returns:
+        MRI tensor with shape ``[batch, 1, depth, height, width]``.
+    """
+
     return batch.images[
         torch.arange(batch.images.shape[0], device=batch.images.device),
         batch.sequence_lengths - 1,
@@ -122,6 +212,24 @@ def collect_baseline_predictions(
     *,
     device: torch.device,
 ) -> BaselinePredictionBundle:
+    """Collect latest-MRI Cox risks without retaining gradients.
+
+    The function preserves the model's current training or evaluation mode,
+    allowing it to support both the first pass of exact Cox training and
+    validation/test evaluation. Returned tensors are moved to the CPU.
+
+    Args:
+        model: Single-MRI Cox risk model.
+        loader: Deterministically ordered landmark data loader.
+        device: Device receiving each collated batch.
+
+    Returns:
+        Concatenated risks, outcomes, patient identifiers, and image histories.
+
+    Raises:
+        ValueError: If the data loader yields no patients.
+    """
+
     risks: list[Tensor] = []
     times: list[Tensor] = []
     events: list[Tensor] = []
@@ -154,7 +262,30 @@ def train_baseline_epoch(
     device: torch.device,
     gradient_clip_norm: float,
 ) -> tuple[float, float]:
-    """Take one exact full-risk-set Cox step using memory-bounded recomputation."""
+    """Take one exact full-risk-set Cox step with bounded activation memory.
+
+    The first pass computes all patient risks without image-encoder gradients
+    and differentiates the complete Cox objective with respect to those risk
+    scores. The second pass recomputes mini-batch risks and backpropagates the
+    precomputed score gradients through the model. This produces the same
+    parameter gradient as a single full-cohort forward pass without retaining
+    every ResNet activation simultaneously.
+
+    Args:
+        model: Cox risk model to optimize.
+        loader: Deterministically ordered training loader.
+        optimizer: Optimizer updated after the second pass.
+        device: Device receiving each collated batch.
+        gradient_clip_norm: Maximum parameter-gradient norm. Values less than
+            or equal to zero disable clipping.
+
+    Returns:
+        A tuple containing full-risk-set Cox loss and training C-index.
+
+    Raises:
+        RuntimeError: If the second pass does not consume every score gradient.
+        ValueError: If prediction collection or Cox loss validation fails.
+    """
 
     model.train()
     predictions = collect_baseline_predictions(model, loader, device=device)
@@ -189,6 +320,21 @@ def evaluate_baseline(
     *,
     device: torch.device,
 ) -> tuple[float, float, BaselinePredictionBundle]:
+    """Evaluate a Cox model on one complete data split.
+
+    Args:
+        model: Cox risk model to evaluate.
+        loader: Landmark data loader for one split.
+        device: Device receiving each collated batch.
+
+    Returns:
+        A tuple containing full-split Cox loss, Harrell C-index, and aligned
+        patient predictions.
+
+    Raises:
+        ValueError: If the data loader is empty or Cox inputs are invalid.
+    """
+
     model.eval()
     predictions = collect_baseline_predictions(model, loader, device=device)
     loss = cox_ph_loss(predictions.risks, predictions.times, predictions.events)
@@ -209,6 +355,21 @@ def _save_checkpoint(
     config: BaselineLandmarkTrainingConfig,
     metrics: EpochMetrics,
 ) -> None:
+    """Atomically save baseline model, optimizer, configuration, and metrics.
+
+    The state is written to a sibling temporary file before replacement into
+    the final checkpoint path.
+
+    Args:
+        checkpoint_path: Final checkpoint destination.
+        run_id: Identifier of the experiment run.
+        epoch: Epoch represented by the checkpoint.
+        model: Baseline model whose state is saved.
+        optimizer: Optimizer whose state is saved.
+        config: Training configuration serialized into the checkpoint.
+        metrics: Training and validation measurements for the epoch.
+    """
+
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = checkpoint_path.with_suffix(checkpoint_path.suffix + ".tmp")
     torch.save(
@@ -232,6 +393,43 @@ def run_baseline_landmark_training(
     comparison_id: str | None = None,
     cohort_records: list[LandmarkPatientRecord] | None = None,
 ) -> BaselineRunResult:
+    """Train, select, evaluate, and persist one landmark Cox baseline.
+
+    When no cohort is supplied, the function queries and validates one from
+    the project database. Paired comparison runs pass the exact records
+    preflighted for both models. Every epoch is checkpointed and persisted.
+
+    Checkpoint selection maximizes validation C-index and uses validation Cox
+    loss to break ties. Training stops after ``patience`` consecutive
+    non-improving epochs. The selected checkpoint is restored before test
+    evaluation and prediction persistence.
+
+    Args:
+        config: Baseline experiment, optimization, and data configuration.
+        engine: Optional SQLAlchemy engine. If ``None``, uses the project
+            database engine.
+        comparison_id: Optional identifier shared with a matched LTSA run. A
+            new identifier is generated when omitted.
+        cohort_records: Optional preflighted landmark cohort. Every record must
+            match ``config.landmark_months``.
+
+    Returns:
+        Run identifiers, selected epoch, validation and test C-indices, and
+        patient-level test predictions.
+
+    Raises:
+        ValueError: If configuration or cohort validation fails, the supplied
+            cohort uses another landmark, or a data loader is empty.
+        FileExistsError: If the generated run checkpoint directory already
+            exists.
+        RuntimeError: If recomputation is inconsistent or training does not
+            produce a selectable checkpoint.
+
+    Note:
+        Exceptions raised after the run row is created mark that row as
+        failed before the original exception is re-raised.
+    """
+
     config.validate()
     _seed_everything(config.seed)
     device = resolve_device(config.device)
