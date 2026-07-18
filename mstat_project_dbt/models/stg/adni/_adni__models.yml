@@ -352,7 +352,7 @@ models:
       - name: visit_code_normed
         data_type: TEXT
         description: |
-          The normalized visit code associated with the MRI image, which standardizes various 
+          The normalized visit code associated with the MRI image, which standardizes various
           formats for baseline visits (e.g., 'BL', 'SC', 'INIT', '4_BL', '4_INIT', '4_SC')
         data_tests:
           - not_null
@@ -373,8 +373,7 @@ models:
           - not_null
           - accepted_values:
               arguments:
-                values:
-                  ["ADNI1", "ADNI2", "ADNIGO/ADNI2", "ADNI3", "ADNI4", "ADNIGO"]
+                values: ["ADNI1", "ADNI2", "ADNIGO/ADNI2", "ADNI3", "ADNI4", "ADNIGO"]
       - name: series_description
         data_type: TEXT
         description: The description of the MRI series

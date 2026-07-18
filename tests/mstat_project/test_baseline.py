@@ -12,6 +12,7 @@ from mstat_project.ml.baseline import (
     build_patient_records,
     concordance_index,
     cox_ph_loss,
+    restore_checkpoint,
     save_checkpoint,
     TrainingConfig,
 )
@@ -147,3 +148,50 @@ def test_checkpoint_round_trip(tmp_path: Path) -> None:
     assert checkpoint["run_id"] == "test-run"
     assert checkpoint["epoch"] == 1
     assert set(checkpoint["model_state_dict"]) == set(model.state_dict())
+
+
+def test_restore_checkpoint_restores_training_state_and_applies_current_optimizer_config(
+    tmp_path: Path,
+) -> None:
+    source_model = torch.nn.Linear(2, 1)
+    source_optimizer = torch.optim.AdamW(source_model.parameters(), lr=1e-3, weight_decay=1e-4)
+    loss = source_model(torch.randn(2, 2)).square().mean()
+    loss.backward()
+    source_optimizer.step()
+
+    checkpoint_path = tmp_path / "epoch_010.pt"
+    save_checkpoint(
+        checkpoint_path,
+        "source-run",
+        10,
+        source_model,
+        source_optimizer,
+        TrainingConfig(epochs=10),
+        {"validation_loss": 0.25},
+    )
+
+    restored_model = torch.nn.Linear(2, 1)
+    restored_optimizer = torch.optim.AdamW(restored_model.parameters(), lr=2e-3, weight_decay=2e-4)
+    epoch, metrics = restore_checkpoint(
+        checkpoint_path,
+        model=restored_model,
+        optimizer=restored_optimizer,
+        device=torch.device("cpu"),
+        learning_rate=2e-3,
+        weight_decay=2e-4,
+    )
+
+    assert epoch == 10
+    assert metrics["validation_loss"] == pytest.approx(0.25)
+    for expected, actual in zip(source_model.parameters(), restored_model.parameters(), strict=True):
+        torch.testing.assert_close(actual, expected)
+    assert restored_optimizer.state
+    assert restored_optimizer.param_groups[0]["lr"] == pytest.approx(2e-3)
+    assert restored_optimizer.param_groups[0]["weight_decay"] == pytest.approx(2e-4)
+
+
+def test_training_config_rejects_missing_resume_checkpoint(tmp_path: Path) -> None:
+    config = TrainingConfig(resume_from=tmp_path / "missing.pt")
+
+    with pytest.raises(FileNotFoundError, match="Resume checkpoint does not exist"):
+        config.validate()

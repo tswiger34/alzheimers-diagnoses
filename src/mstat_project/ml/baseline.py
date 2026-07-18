@@ -10,6 +10,12 @@ Run with::
 
     python -m mstat_project.ml.baseline --epochs 10 --batch-size 2
 
+Continue a previous run through epoch 20 with::
+
+    python -m mstat_project.ml.baseline \
+        --resume-from data/artifacts/model_checkpoints/baseline/<run-id>/epoch_010.pt \
+        --epochs 20
+
 Every epoch is checkpointed below ``data/artifacts/model_checkpoints/baseline``
 by default.  Run metadata, epoch metrics, the patient cohort, and test
 predictions are stored in the Postgres ``_ml`` schema.
@@ -66,6 +72,9 @@ class TrainingConfig:
             selection.
         tensor_dir: Directory containing patient tensor packages.
         checkpoint_root: Root directory for run-specific checkpoints.
+        resume_from: Optional checkpoint whose model and optimizer state
+            should be restored before training. ``epochs`` remains the total
+            target epoch, rather than the number of additional epochs.
         spatial_size: Optional ``(depth, height, width)`` used to resize MRI
             volumes. ``None`` preserves stored dimensions.
     """
@@ -80,6 +89,7 @@ class TrainingConfig:
     device: str = "auto"
     tensor_dir: Path = field(default_factory=default_tensor_dir)
     checkpoint_root: Path = field(default_factory=default_checkpoint_dir)
+    resume_from: Path | None = None
     spatial_size: tuple[int, int, int] | None = (96, 112, 96)
 
     def validate(self) -> None:
@@ -101,6 +111,8 @@ class TrainingConfig:
             raise ValueError("weight_decay cannot be negative")
         if self.num_workers < 0:
             raise ValueError("num_workers cannot be negative")
+        if self.resume_from is not None and not self.resume_from.is_file():
+            raise FileNotFoundError(f"Resume checkpoint does not exist: {self.resume_from}")
         if self.spatial_size is not None and any(size < 16 for size in self.spatial_size):
             raise ValueError("all spatial dimensions must be at least 16")
 
@@ -1010,14 +1022,73 @@ def save_checkpoint(
     temporary_path.replace(checkpoint_path)
 
 
+def restore_checkpoint(
+    checkpoint_path: Path,
+    *,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    learning_rate: float,
+    weight_decay: float,
+) -> tuple[int, dict[str, float]]:
+    """Restore training state from a baseline checkpoint.
+
+    Optimizer moments are restored while the current run's learning rate and
+    weight decay are applied to every optimizer parameter group.
+
+    Args:
+        checkpoint_path: Existing baseline checkpoint to restore.
+        model: Model receiving the saved parameter state.
+        optimizer: Optimizer receiving the saved training state.
+        device: Device onto which tensors in the checkpoint are mapped.
+        learning_rate: Learning rate for the continued training run.
+        weight_decay: Weight decay for the continued training run.
+
+    Returns:
+        The completed checkpoint epoch and its saved metrics.
+
+    Raises:
+        ValueError: If the file is not a compatible baseline checkpoint.
+        RuntimeError: If saved model or optimizer state is incompatible.
+    """
+
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    if not isinstance(checkpoint, dict):
+        raise ValueError(f"Checkpoint must contain a dictionary: {checkpoint_path}")
+
+    required_keys = {"epoch", "model_state_dict", "optimizer_state_dict", "metrics"}
+    missing_keys = required_keys.difference(checkpoint)
+    if missing_keys:
+        missing = ", ".join(sorted(missing_keys))
+        raise ValueError(f"Checkpoint is missing required fields ({missing}): {checkpoint_path}")
+
+    epoch = checkpoint["epoch"]
+    metrics = checkpoint["metrics"]
+    if not isinstance(epoch, int) or epoch < 1:
+        raise ValueError(f"Checkpoint epoch must be a positive integer: {checkpoint_path}")
+    if not isinstance(metrics, dict):
+        raise ValueError(f"Checkpoint metrics must be a dictionary: {checkpoint_path}")
+    if "validation_loss" not in metrics:
+        raise ValueError(f"Checkpoint metrics are missing validation_loss: {checkpoint_path}")
+
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    for parameter_group in optimizer.param_groups:
+        parameter_group["lr"] = learning_rate
+        parameter_group["weight_decay"] = weight_decay
+
+    return epoch, metrics
+
+
 def run_training(config: TrainingConfig, engine: Engine | None = None) -> str:
     """Train, validate, test, checkpoint, and persist one legacy baseline run.
 
     The function queries one selected MRI per patient, validates tensor and
     split availability, and trains with the exact full-risk-set Cox objective.
     Every epoch is checkpointed and written to the legacy baseline result
-    tables. The checkpoint with minimum validation Cox loss is restored for
-    final test evaluation.
+    tables. When ``config.resume_from`` is set, model and optimizer state are
+    restored and training begins at the following epoch. The checkpoint with
+    minimum validation Cox loss is restored for final test evaluation.
 
     Args:
         config: Baseline training, loading, and checkpoint configuration.
@@ -1064,7 +1135,8 @@ def run_training(config: TrainingConfig, engine: Engine | None = None) -> str:
     )
 
     try:
-        model = SingleImageSurvivalModel(weights=ResNet101_Weights.IMAGENET1K_V2).to(device)
+        initial_weights = ResNet101_Weights.IMAGENET1K_V2 if config.resume_from is None else None
+        model = SingleImageSurvivalModel(weights=initial_weights).to(device)
         optimizer = torch.optim.AdamW(
             model.parameters(),
             lr=config.learning_rate,
@@ -1073,8 +1145,31 @@ def run_training(config: TrainingConfig, engine: Engine | None = None) -> str:
         best_epoch = 0
         best_validation_loss = math.inf
         best_checkpoint: Path | None = None
+        first_epoch = 1
 
-        for epoch in range(1, config.epochs + 1):
+        if config.resume_from is not None:
+            resumed_epoch, resumed_metrics = restore_checkpoint(
+                config.resume_from,
+                model=model,
+                optimizer=optimizer,
+                device=device,
+                learning_rate=config.learning_rate,
+                weight_decay=config.weight_decay,
+            )
+            if config.epochs <= resumed_epoch:
+                raise ValueError(
+                    f"epochs ({config.epochs}) must be greater than the resumed checkpoint epoch ({resumed_epoch})"
+                )
+            first_epoch = resumed_epoch + 1
+            best_epoch = resumed_epoch
+            best_validation_loss = float(resumed_metrics["validation_loss"])
+            best_checkpoint = config.resume_from
+            print(
+                f"Resumed model and optimizer from {config.resume_from} at epoch {resumed_epoch}; "
+                f"continuing through epoch {config.epochs}"
+            )
+
+        for epoch in range(first_epoch, config.epochs + 1):
             train_loss, train_c_index = train_one_epoch(
                 model,
                 loaders["train"],
@@ -1168,6 +1263,11 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tensor-dir", type=Path, default=default_tensor_dir())
     parser.add_argument("--checkpoint-dir", type=Path, default=default_checkpoint_dir())
     parser.add_argument(
+        "--resume-from",
+        type=Path,
+        help="checkpoint to resume; --epochs is the total target epoch",
+    )
+    parser.add_argument(
         "--spatial-size",
         type=int,
         nargs=3,
@@ -1201,6 +1301,7 @@ def main(argv: Sequence[str] | None = None) -> str:
         device=args.device,
         tensor_dir=args.tensor_dir,
         checkpoint_root=args.checkpoint_dir,
+        resume_from=args.resume_from,
         spatial_size=tuple(args.spatial_size),
     )
     return run_training(config)
