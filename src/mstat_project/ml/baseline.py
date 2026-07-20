@@ -16,6 +16,13 @@ Continue a previous run through epoch 20 with::
         --resume-from data/artifacts/model_checkpoints/baseline/<run-id>/epoch_010.pt \
         --epochs 20
 
+Start a separate run at epoch 1 using another run's model weights with::
+
+    python -m mstat_project.ml.baseline \
+        --initial-weights-from data/artifacts/model_checkpoints/baseline/<run-id>/epoch_010.pt \
+        --learning-rate 0.0001 \
+        --epochs 10
+
 Every epoch is checkpointed below ``data/artifacts/model_checkpoints/baseline``
 by default.  Run metadata, epoch metrics, the patient cohort, and test
 predictions are stored in the Postgres ``_ml`` schema.
@@ -75,6 +82,9 @@ class TrainingConfig:
         resume_from: Optional checkpoint whose model and optimizer state
             should be restored before training. ``epochs`` remains the total
             target epoch, rather than the number of additional epochs.
+        initial_weights_from: Optional checkpoint whose model weights should
+            initialize a separate run. The optimizer starts fresh and epoch
+            numbering begins at one.
         spatial_size: Optional ``(depth, height, width)`` used to resize MRI
             volumes. ``None`` preserves stored dimensions.
     """
@@ -90,6 +100,7 @@ class TrainingConfig:
     tensor_dir: Path = field(default_factory=default_tensor_dir)
     checkpoint_root: Path = field(default_factory=default_checkpoint_dir)
     resume_from: Path | None = None
+    initial_weights_from: Path | None = None
     spatial_size: tuple[int, int, int] | None = (96, 112, 96)
 
     def validate(self) -> None:
@@ -111,8 +122,12 @@ class TrainingConfig:
             raise ValueError("weight_decay cannot be negative")
         if self.num_workers < 0:
             raise ValueError("num_workers cannot be negative")
+        if self.resume_from is not None and self.initial_weights_from is not None:
+            raise ValueError("resume_from and initial_weights_from are mutually exclusive")
         if self.resume_from is not None and not self.resume_from.is_file():
             raise FileNotFoundError(f"Resume checkpoint does not exist: {self.resume_from}")
+        if self.initial_weights_from is not None and not self.initial_weights_from.is_file():
+            raise FileNotFoundError(f"Initial-weights checkpoint does not exist: {self.initial_weights_from}")
         if self.spatial_size is not None and any(size < 16 for size in self.spatial_size):
             raise ValueError("all spatial dimensions must be at least 16")
 
@@ -504,6 +519,16 @@ class BaselineResultStore:
                 config JSONB NOT NULL,
                 device TEXT NOT NULL,
                 checkpoint_dir TEXT NOT NULL,
+                initial_weights_kind TEXT NOT NULL DEFAULT 'resnet101_imagenet1k_v2'
+                    CHECK (
+                        initial_weights_kind IN (
+                            'resnet101_imagenet1k_v2',
+                            'baseline_checkpoint',
+                            'resumed_baseline_checkpoint'
+                        )
+                    ),
+                initial_weights_source_run_id TEXT,
+                initial_weights_checkpoint_path TEXT,
                 train_patients INTEGER NOT NULL,
                 validation_patients INTEGER NOT NULL,
                 test_patients INTEGER NOT NULL,
@@ -515,6 +540,29 @@ class BaselineResultStore:
                 test_c_index DOUBLE PRECISION,
                 error_message TEXT
             )
+            """,
+            """
+            ALTER TABLE _ml.baseline_runs
+            ADD COLUMN IF NOT EXISTS initial_weights_kind TEXT
+                NOT NULL DEFAULT 'resnet101_imagenet1k_v2'
+            """,
+            """
+            ALTER TABLE _ml.baseline_runs
+            ADD COLUMN IF NOT EXISTS initial_weights_source_run_id TEXT
+            """,
+            """
+            ALTER TABLE _ml.baseline_runs
+            ADD COLUMN IF NOT EXISTS initial_weights_checkpoint_path TEXT
+            """,
+            """
+            UPDATE _ml.baseline_runs
+            SET initial_weights_kind = 'resumed_baseline_checkpoint',
+                initial_weights_checkpoint_path = COALESCE(
+                    initial_weights_checkpoint_path,
+                    config ->> 'resume_from'
+                )
+            WHERE config ->> 'resume_from' IS NOT NULL
+              AND initial_weights_kind = 'resnet101_imagenet1k_v2'
             """,
             """
             CREATE TABLE IF NOT EXISTS _ml.baseline_run_patients (
@@ -564,6 +612,7 @@ class BaselineResultStore:
         device: torch.device,
         checkpoint_dir: Path,
         records: Sequence[PatientRecord],
+        initial_weights_source_run_id: str | None = None,
     ) -> None:
         """Create a running experiment and persist its patient cohort.
 
@@ -573,6 +622,8 @@ class BaselineResultStore:
             device: PyTorch device used for the run.
             checkpoint_dir: Directory assigned to run checkpoints.
             records: Exact patient records used across all splits.
+            initial_weights_source_run_id: Run identifier stored in the
+                checkpoint used to initialize or resume this run.
         """
 
         counts = {split: sum(record.split == split for record in records) for split in SPLIT_NAMES}
@@ -581,16 +632,29 @@ class BaselineResultStore:
             for split in SPLIT_NAMES
         }
         config_json = json.dumps(asdict(config), default=str)
+        if config.resume_from is not None:
+            initial_weights_kind = "resumed_baseline_checkpoint"
+            initial_weights_checkpoint_path = str(config.resume_from.resolve())
+        elif config.initial_weights_from is not None:
+            initial_weights_kind = "baseline_checkpoint"
+            initial_weights_checkpoint_path = str(config.initial_weights_from.resolve())
+        else:
+            initial_weights_kind = "resnet101_imagenet1k_v2"
+            initial_weights_checkpoint_path = None
         with self.engine.begin() as connection:
             connection.execute(
                 text(
                     """
                     INSERT INTO _ml.baseline_runs (
                         run_id, status, config, device, checkpoint_dir,
+                        initial_weights_kind, initial_weights_source_run_id,
+                        initial_weights_checkpoint_path,
                         train_patients, validation_patients, test_patients,
                         train_events, validation_events, test_events
                     ) VALUES (
                         :run_id, 'running', CAST(:config AS JSONB), :device, :checkpoint_dir,
+                        :initial_weights_kind, :initial_weights_source_run_id,
+                        :initial_weights_checkpoint_path,
                         :train_patients, :validation_patients, :test_patients,
                         :train_events, :validation_events, :test_events
                     )
@@ -601,6 +665,9 @@ class BaselineResultStore:
                     "config": config_json,
                     "device": str(device),
                     "checkpoint_dir": str(checkpoint_dir.resolve()),
+                    "initial_weights_kind": initial_weights_kind,
+                    "initial_weights_source_run_id": initial_weights_source_run_id,
+                    "initial_weights_checkpoint_path": initial_weights_checkpoint_path,
                     "train_patients": counts["train"],
                     "validation_patients": counts["validation"],
                     "test_patients": counts["test"],
@@ -1022,6 +1089,62 @@ def save_checkpoint(
     temporary_path.replace(checkpoint_path)
 
 
+def _load_baseline_checkpoint(
+    checkpoint_path: Path,
+    *,
+    device: torch.device,
+    required_keys: set[str],
+) -> dict[str, Any]:
+    """Load a checkpoint dictionary and validate its required top-level keys."""
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    if not isinstance(checkpoint, dict):
+        raise ValueError(f"Checkpoint must contain a dictionary: {checkpoint_path}")
+
+    missing_keys = required_keys.difference(checkpoint)
+    if missing_keys:
+        missing = ", ".join(sorted(missing_keys))
+        raise ValueError(f"Checkpoint is missing required fields ({missing}): {checkpoint_path}")
+    return checkpoint
+
+
+def _checkpoint_source_run_id(checkpoint: dict[str, Any], checkpoint_path: Path) -> str:
+    """Return and validate the run identifier embedded in a checkpoint."""
+    source_run_id = checkpoint["run_id"]
+    if not isinstance(source_run_id, str) or not source_run_id:
+        raise ValueError(f"Checkpoint run_id must be a non-empty string: {checkpoint_path}")
+    return source_run_id
+
+
+def _restore_checkpoint_state(
+    checkpoint: dict[str, Any],
+    checkpoint_path: Path,
+    *,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    learning_rate: float,
+    weight_decay: float,
+) -> tuple[int, dict[str, float], str]:
+    """Apply a loaded checkpoint's model and optimizer training state."""
+
+    epoch = checkpoint["epoch"]
+    metrics = checkpoint["metrics"]
+    if not isinstance(epoch, int) or epoch < 1:
+        raise ValueError(f"Checkpoint epoch must be a positive integer: {checkpoint_path}")
+    if not isinstance(metrics, dict):
+        raise ValueError(f"Checkpoint metrics must be a dictionary: {checkpoint_path}")
+    if "validation_loss" not in metrics:
+        raise ValueError(f"Checkpoint metrics are missing validation_loss: {checkpoint_path}")
+    source_run_id = _checkpoint_source_run_id(checkpoint, checkpoint_path)
+
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    for parameter_group in optimizer.param_groups:
+        parameter_group["lr"] = learning_rate
+        parameter_group["weight_decay"] = weight_decay
+
+    return epoch, metrics, source_run_id
+
+
 def restore_checkpoint(
     checkpoint_path: Path,
     *,
@@ -1052,32 +1175,56 @@ def restore_checkpoint(
         RuntimeError: If saved model or optimizer state is incompatible.
     """
 
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    if not isinstance(checkpoint, dict):
-        raise ValueError(f"Checkpoint must contain a dictionary: {checkpoint_path}")
-
-    required_keys = {"epoch", "model_state_dict", "optimizer_state_dict", "metrics"}
-    missing_keys = required_keys.difference(checkpoint)
-    if missing_keys:
-        missing = ", ".join(sorted(missing_keys))
-        raise ValueError(f"Checkpoint is missing required fields ({missing}): {checkpoint_path}")
-
-    epoch = checkpoint["epoch"]
-    metrics = checkpoint["metrics"]
-    if not isinstance(epoch, int) or epoch < 1:
-        raise ValueError(f"Checkpoint epoch must be a positive integer: {checkpoint_path}")
-    if not isinstance(metrics, dict):
-        raise ValueError(f"Checkpoint metrics must be a dictionary: {checkpoint_path}")
-    if "validation_loss" not in metrics:
-        raise ValueError(f"Checkpoint metrics are missing validation_loss: {checkpoint_path}")
-
-    model.load_state_dict(checkpoint["model_state_dict"])
-    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-    for parameter_group in optimizer.param_groups:
-        parameter_group["lr"] = learning_rate
-        parameter_group["weight_decay"] = weight_decay
-
+    checkpoint = _load_baseline_checkpoint(
+        checkpoint_path,
+        device=device,
+        required_keys={"run_id", "epoch", "model_state_dict", "optimizer_state_dict", "metrics"},
+    )
+    epoch, metrics, _ = _restore_checkpoint_state(
+        checkpoint,
+        checkpoint_path,
+        model=model,
+        optimizer=optimizer,
+        learning_rate=learning_rate,
+        weight_decay=weight_decay,
+    )
     return epoch, metrics
+
+
+def load_initial_weights(
+    checkpoint_path: Path,
+    *,
+    model: nn.Module,
+    device: torch.device,
+) -> str:
+    """Initialize a model from another baseline run without resuming it.
+
+    Only ``model_state_dict`` is loaded. Optimizer state, source epoch, source
+    metrics, and source configuration are intentionally ignored so the caller
+    starts an independent run at epoch one.
+
+    Args:
+        checkpoint_path: Existing baseline checkpoint containing model
+            parameters.
+        model: Model receiving the saved parameter state.
+        device: Device onto which tensors in the checkpoint are mapped.
+
+    Returns:
+        Identifier of the run that produced the initial weights.
+
+    Raises:
+        ValueError: If the file is not a compatible baseline checkpoint.
+        RuntimeError: If the saved model state is incompatible.
+    """
+
+    checkpoint = _load_baseline_checkpoint(
+        checkpoint_path,
+        device=device,
+        required_keys={"run_id", "model_state_dict"},
+    )
+    source_run_id = _checkpoint_source_run_id(checkpoint, checkpoint_path)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    return source_run_id
 
 
 def run_training(config: TrainingConfig, engine: Engine | None = None) -> str:
@@ -1087,8 +1234,10 @@ def run_training(config: TrainingConfig, engine: Engine | None = None) -> str:
     split availability, and trains with the exact full-risk-set Cox objective.
     Every epoch is checkpointed and written to the legacy baseline result
     tables. When ``config.resume_from`` is set, model and optimizer state are
-    restored and training begins at the following epoch. The checkpoint with
-    minimum validation Cox loss is restored for final test evaluation.
+    restored and training begins at the following epoch. When
+    ``config.initial_weights_from`` is set, only model weights are loaded into
+    an otherwise new run that begins at epoch one. The checkpoint with minimum
+    validation Cox loss is restored for final test evaluation.
 
     Args:
         config: Baseline training, loading, and checkpoint configuration.
@@ -1124,18 +1273,11 @@ def run_training(config: TrainingConfig, engine: Engine | None = None) -> str:
     checkpoint_dir = config.checkpoint_root / run_id
     result_store = BaselineResultStore(database_engine)
     result_store.ensure_schema()
-    result_store.start_run(run_id, config, device, checkpoint_dir, records)
-
-    print(
-        f"Run {run_id} on {device}: "
-        + ", ".join(
-            f"{split}={len(split_records[split])} ({sum(r.event_observed for r in split_records[split])} events)"
-            for split in SPLIT_NAMES
-        )
-    )
+    run_started = False
 
     try:
-        initial_weights = ResNet101_Weights.IMAGENET1K_V2 if config.resume_from is None else None
+        uses_checkpoint_weights = config.resume_from is not None or config.initial_weights_from is not None
+        initial_weights = None if uses_checkpoint_weights else ResNet101_Weights.IMAGENET1K_V2
         model = SingleImageSurvivalModel(weights=initial_weights).to(device)
         optimizer = torch.optim.AdamW(
             model.parameters(),
@@ -1146,13 +1288,25 @@ def run_training(config: TrainingConfig, engine: Engine | None = None) -> str:
         best_validation_loss = math.inf
         best_checkpoint: Path | None = None
         first_epoch = 1
+        initial_weights_source_run_id: str | None = None
 
         if config.resume_from is not None:
-            resumed_epoch, resumed_metrics = restore_checkpoint(
+            resume_checkpoint = _load_baseline_checkpoint(
+                config.resume_from,
+                device=device,
+                required_keys={
+                    "run_id",
+                    "epoch",
+                    "model_state_dict",
+                    "optimizer_state_dict",
+                    "metrics",
+                },
+            )
+            resumed_epoch, resumed_metrics, initial_weights_source_run_id = _restore_checkpoint_state(
+                resume_checkpoint,
                 config.resume_from,
                 model=model,
                 optimizer=optimizer,
-                device=device,
                 learning_rate=config.learning_rate,
                 weight_decay=config.weight_decay,
             )
@@ -1168,6 +1322,34 @@ def run_training(config: TrainingConfig, engine: Engine | None = None) -> str:
                 f"Resumed model and optimizer from {config.resume_from} at epoch {resumed_epoch}; "
                 f"continuing through epoch {config.epochs}"
             )
+        elif config.initial_weights_from is not None:
+            initial_weights_source_run_id = load_initial_weights(
+                config.initial_weights_from,
+                model=model,
+                device=device,
+            )
+            print(
+                f"Initialized separate run from model weights in {config.initial_weights_from} "
+                f"(source run {initial_weights_source_run_id}); starting at epoch 1 with a fresh optimizer"
+            )
+
+        result_store.start_run(
+            run_id,
+            config,
+            device,
+            checkpoint_dir,
+            records,
+            initial_weights_source_run_id=initial_weights_source_run_id,
+        )
+        run_started = True
+        print(
+            f"Run {run_id} on {device}: "
+            + ", ".join(
+                f"{split}={len(split_records[split])} "
+                f"({sum(r.event_observed for r in split_records[split])} events)"
+                for split in SPLIT_NAMES
+            )
+        )
 
         for epoch in range(first_epoch, config.epochs + 1):
             train_loss, train_c_index = train_one_epoch(
@@ -1233,10 +1415,11 @@ def run_training(config: TrainingConfig, engine: Engine | None = None) -> str:
         )
         return run_id
     except Exception as exc:
-        try:
-            result_store.fail_run(run_id, f"{type(exc).__name__}: {exc}")
-        except Exception as persistence_exc:
-            exc.add_note(f"Additionally failed to mark Postgres run as failed: {persistence_exc}")
+        if run_started:
+            try:
+                result_store.fail_run(run_id, f"{type(exc).__name__}: {exc}")
+            except Exception as persistence_exc:
+                exc.add_note(f"Additionally failed to mark Postgres run as failed: {persistence_exc}")
         raise
 
 
@@ -1262,10 +1445,16 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda, cuda:0, or mps")
     parser.add_argument("--tensor-dir", type=Path, default=default_tensor_dir())
     parser.add_argument("--checkpoint-dir", type=Path, default=default_checkpoint_dir())
-    parser.add_argument(
+    checkpoint_source_group = parser.add_mutually_exclusive_group()
+    checkpoint_source_group.add_argument(
         "--resume-from",
         type=Path,
         help="checkpoint to resume; --epochs is the total target epoch",
+    )
+    checkpoint_source_group.add_argument(
+        "--initial-weights-from",
+        type=Path,
+        help="model checkpoint for a separate run starting at epoch 1 with a fresh optimizer",
     )
     parser.add_argument(
         "--spatial-size",
@@ -1302,6 +1491,7 @@ def main(argv: Sequence[str] | None = None) -> str:
         tensor_dir=args.tensor_dir,
         checkpoint_root=args.checkpoint_dir,
         resume_from=args.resume_from,
+        initial_weights_from=args.initial_weights_from,
         spatial_size=tuple(args.spatial_size),
     )
     return run_training(config)

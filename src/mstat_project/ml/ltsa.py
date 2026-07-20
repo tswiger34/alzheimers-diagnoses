@@ -73,7 +73,7 @@ class LTSATrainingConfig:
             volumes. ``None`` preserves stored dimensions.
     """
 
-    landmark_months: float
+    landmark_months: float = 60.0
     epochs: int = 50
     patience: int = 10
     batch_size: int = 2
@@ -754,7 +754,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--landmark-months", type=float, required=True)
+    parser.add_argument("--landmark-months", type=float, default=60.0)
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--patience", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=2)

@@ -42,6 +42,10 @@ Useful smoke-test options are `--epochs 1 --patience 1 --no-pretrained`. Real tr
 
 LTSA uses six-month discrete hazards, censoring NLL with `beta=0.15`, and next-visit feature MSE weighted by `1.0`. Its final time bin is reserved for durations beyond the maximum training support. Checkpoints are selected by validation C-index, with validation loss as the tie-breaker. LTSA risk is negative restricted mean survival time; the baseline uses the exact full-risk-set Cox partial likelihood.
 
+The legacy baseline can either continue a checkpoint with `--resume-from` or start an independent run
+at epoch 1 with `--initial-weights-from`. The independent mode loads only model parameters, so it uses
+the new run's configuration and a fresh optimizer. These modes are mutually exclusive.
+
 ## Results
 
 Checkpoints are written below `data/artifacts/model_checkpoints`. New comparison runs populate:
@@ -52,6 +56,8 @@ Checkpoints are written below `data/artifacts/model_checkpoints`. New comparison
 - `_ml.survival_test_predictions`: scalar risk, outcome, image history, and LTSA survival curve.
 
 The original `mstat_project.ml.baseline` command and `_ml.baseline_*` tables remain available as legacy history.
+`_ml.baseline_runs` records the initial-weight kind, source run ID, and checkpoint path for new and resumed
+legacy runs.
 
 ## Verification
 
