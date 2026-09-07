@@ -4,6 +4,12 @@ The module builds split-specific sequence loaders, optimizes discrete survival
 and next-visit feature objectives, selects checkpoints using validation
 concordance, evaluates the selected model on the test split, and persists the
 complete run through the unified survival result store.
+
+Continue a previous run through epoch 75 with::
+
+    python -m mstat_project.ml.ltsa \
+        --resume-from data/artifacts/model_checkpoints/ltsa/<run-id>/epoch_050.pt \
+        --epochs 75
 """
 
 import argparse
@@ -13,7 +19,7 @@ import random
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import torch
 import torch.nn.functional as F
@@ -69,6 +75,9 @@ class LTSATrainingConfig:
         pretrained: Whether to initialize ResNet-101 with ImageNet weights.
         tensor_dir: Directory containing patient tensor packages.
         checkpoint_root: Root directory for run-specific checkpoints.
+        resume_from: Optional checkpoint whose model and optimizer state
+            should be restored before training. ``epochs`` remains the total
+            target epoch, rather than the number of additional epochs.
         spatial_size: Optional ``(depth, height, width)`` used to resize MRI
             volumes. ``None`` preserves stored dimensions.
     """
@@ -92,6 +101,7 @@ class LTSATrainingConfig:
     pretrained: bool = True
     tensor_dir: Path = field(default_factory=default_tensor_dir)
     checkpoint_root: Path = field(default_factory=lambda: default_checkpoint_dir("ltsa"))
+    resume_from: Path | None = None
     spatial_size: tuple[int, int, int] | None = (96, 112, 96)
 
     def validate(self) -> None:
@@ -120,6 +130,8 @@ class LTSATrainingConfig:
             raise ValueError("n_heads and n_layers must be positive; num_workers cannot be negative")
         if 2_048 % self.n_heads != 0:
             raise ValueError("n_heads must evenly divide the ResNet-101 feature width (2048)")
+        if self.resume_from is not None and not self.resume_from.is_file():
+            raise FileNotFoundError(f"Resume checkpoint does not exist: {self.resume_from}")
 
 
 @dataclass(frozen=True)
@@ -524,6 +536,131 @@ def save_ltsa_checkpoint(
     temporary_path.replace(checkpoint_path)
 
 
+def _load_ltsa_checkpoint(
+    checkpoint_path: Path,
+    *,
+    device: torch.device,
+    required_keys: set[str],
+) -> dict[str, Any]:
+    """Load an LTSA checkpoint dictionary and validate its top-level keys."""
+
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    if not isinstance(checkpoint, dict):
+        raise ValueError(f"Checkpoint must contain a dictionary: {checkpoint_path}")
+
+    missing_keys = required_keys.difference(checkpoint)
+    if missing_keys:
+        missing = ", ".join(sorted(missing_keys))
+        raise ValueError(f"Checkpoint is missing required fields ({missing}): {checkpoint_path}")
+    return checkpoint
+
+
+def _restore_ltsa_checkpoint_state(
+    checkpoint: dict[str, Any],
+    checkpoint_path: Path,
+    *,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    device_grid: DiscreteTimeGrid,
+    learning_rate: float,
+    weight_decay: float,
+) -> tuple[int, dict[str, Any], str]:
+    """Validate and apply a loaded checkpoint's LTSA training state."""
+
+    epoch = checkpoint["epoch"]
+    metrics = checkpoint["metrics"]
+    source_run_id = checkpoint["run_id"]
+    saved_grid_data = checkpoint["time_grid"]
+
+    if not isinstance(epoch, int) or epoch < 1:
+        raise ValueError(f"Checkpoint epoch must be a positive integer: {checkpoint_path}")
+    if not isinstance(metrics, dict):
+        raise ValueError(f"Checkpoint metrics must be a dictionary: {checkpoint_path}")
+    required_metrics = {"validation_total_loss", "validation_c_index"}
+    missing_metrics = required_metrics.difference(metrics)
+    if missing_metrics:
+        missing = ", ".join(sorted(missing_metrics))
+        raise ValueError(f"Checkpoint metrics are missing required fields ({missing}): {checkpoint_path}")
+    if not isinstance(source_run_id, str) or not source_run_id:
+        raise ValueError(f"Checkpoint run_id must be a non-empty string: {checkpoint_path}")
+    if not isinstance(saved_grid_data, dict):
+        raise ValueError(f"Checkpoint time_grid must be a dictionary: {checkpoint_path}")
+    try:
+        saved_grid = DiscreteTimeGrid(**saved_grid_data)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Checkpoint contains an invalid time_grid: {checkpoint_path}") from exc
+    if saved_grid != device_grid:
+        raise ValueError(
+            f"Checkpoint time grid {saved_grid} does not match the current training grid {device_grid}: "
+            f"{checkpoint_path}"
+        )
+
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    for parameter_group in optimizer.param_groups:
+        parameter_group["lr"] = learning_rate
+        parameter_group["weight_decay"] = weight_decay
+
+    return epoch, metrics, source_run_id
+
+
+def restore_ltsa_checkpoint(
+    checkpoint_path: Path,
+    *,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    grid: DiscreteTimeGrid,
+    device: torch.device,
+    learning_rate: float,
+    weight_decay: float,
+) -> tuple[int, dict[str, Any]]:
+    """Restore model and optimizer state from an LTSA checkpoint.
+
+    Optimizer moments are restored while the current run's learning rate and
+    weight decay are applied to every optimizer parameter group. The saved
+    discrete time grid must match the grid fitted for the current cohort.
+
+    Args:
+        checkpoint_path: Existing LTSA checkpoint to restore.
+        model: Model receiving the saved parameter state.
+        optimizer: Optimizer receiving the saved training state.
+        grid: Current run's fitted discrete survival grid.
+        device: Device onto which checkpoint tensors are mapped.
+        learning_rate: Learning rate for the continued run.
+        weight_decay: Weight decay for the continued run.
+
+    Returns:
+        The completed checkpoint epoch and its saved metrics.
+
+    Raises:
+        ValueError: If the checkpoint is malformed or uses another time grid.
+        RuntimeError: If the saved model or optimizer state is incompatible.
+    """
+
+    checkpoint = _load_ltsa_checkpoint(
+        checkpoint_path,
+        device=device,
+        required_keys={
+            "run_id",
+            "epoch",
+            "model_state_dict",
+            "optimizer_state_dict",
+            "time_grid",
+            "metrics",
+        },
+    )
+    epoch, metrics, _ = _restore_ltsa_checkpoint_state(
+        checkpoint,
+        checkpoint_path,
+        model=model,
+        optimizer=optimizer,
+        device_grid=grid,
+        learning_rate=learning_rate,
+        weight_decay=weight_decay,
+    )
+    return epoch, metrics
+
+
 def run_training(
     config: LTSATrainingConfig,
     *,
@@ -538,10 +675,12 @@ def run_training(
     reuse the exact records preflighted for the baseline. The discrete grid is
     fitted only on training durations.
 
-    Every epoch is checkpointed and persisted. Selection maximizes validation
-    C-index and uses validation total loss to break C-index ties. Training
-    stops after ``patience`` consecutive non-improving epochs. The selected
-    checkpoint is restored before test prediction and persistence.
+    Every epoch is checkpointed and persisted. When ``config.resume_from`` is
+    set, model and optimizer state are restored and training begins at the
+    following epoch. Selection maximizes validation C-index and uses validation
+    total loss to break C-index ties. Training stops after ``patience``
+    consecutive non-improving epochs. The selected checkpoint is restored
+    before test prediction and persistence.
 
     Args:
         config: Validated experiment, architecture, and data configuration.
@@ -608,7 +747,7 @@ def run_training(
 
     try:
         encoder = OrthogonalSliceResNet101Encoder(
-            weights=ResNet101_Weights.IMAGENET1K_V2 if config.pretrained else None
+            weights=ResNet101_Weights.IMAGENET1K_V2 if config.pretrained and config.resume_from is None else None
         )
         model = LTSA(
             encoder,
@@ -629,8 +768,49 @@ def run_training(
         best_validation_c_index = -math.inf
         best_checkpoint: Path | None = None
         epochs_without_improvement = 0
+        first_epoch = 1
 
-        for epoch in range(1, config.epochs + 1):
+        if config.resume_from is not None:
+            resume_checkpoint = _load_ltsa_checkpoint(
+                config.resume_from,
+                device=device,
+                required_keys={
+                    "run_id",
+                    "epoch",
+                    "model_state_dict",
+                    "optimizer_state_dict",
+                    "time_grid",
+                    "metrics",
+                },
+            )
+            resumed_epoch, resumed_metrics, source_run_id = _restore_ltsa_checkpoint_state(
+                resume_checkpoint,
+                config.resume_from,
+                model=model,
+                optimizer=optimizer,
+                device_grid=grid,
+                learning_rate=config.learning_rate,
+                weight_decay=config.weight_decay,
+            )
+            if config.epochs <= resumed_epoch:
+                raise ValueError(
+                    f"epochs ({config.epochs}) must be greater than the resumed checkpoint epoch ({resumed_epoch})"
+                )
+            first_epoch = resumed_epoch + 1
+            best_epoch = resumed_epoch
+            best_validation_loss = float(resumed_metrics["validation_total_loss"])
+            best_validation_c_index = float(resumed_metrics["validation_c_index"])
+            best_checkpoint = config.resume_from
+            LOGGER.info(
+                "Resumed LTSA model and optimizer from %s at epoch %d (source run %s); "
+                "continuing through epoch %d",
+                config.resume_from,
+                resumed_epoch,
+                source_run_id,
+                config.epochs,
+            )
+
+        for epoch in range(first_epoch, config.epochs + 1):
             train_total, train_survival, train_auxiliary, train_c_index = _run_epoch(
                 model,
                 loaders["train"],
@@ -773,6 +953,11 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--no-pretrained", action="store_true")
     parser.add_argument("--tensor-dir", type=Path, default=default_tensor_dir())
     parser.add_argument("--checkpoint-dir", type=Path, default=default_checkpoint_dir("ltsa"))
+    parser.add_argument(
+        "--resume-from",
+        type=Path,
+        help="checkpoint to resume; --epochs is the total target epoch",
+    )
     parser.add_argument("--spatial-size", type=int, nargs=3, default=(96, 112, 96))
     return parser.parse_args(argv)
 
@@ -811,6 +996,7 @@ def main(argv: Sequence[str] | None = None) -> str:
             pretrained=not args.no_pretrained,
             tensor_dir=args.tensor_dir,
             checkpoint_root=args.checkpoint_dir,
+            resume_from=args.resume_from,
             spatial_size=tuple(args.spatial_size),
         )
     )

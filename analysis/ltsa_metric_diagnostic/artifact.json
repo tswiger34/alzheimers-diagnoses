@@ -1,0 +1,976 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "Why the LTSA-60 loss is lower while its C-index is worse",
+    "description": "A source-backed diagnostic of the legacy baseline and LTSA month-60 training results.",
+    "generatedAt": "2026-07-21T01:25:28Z",
+    "cards": [
+      {
+        "id": "baseline_quoted_c",
+        "description": "Legacy baseline validation C-index at the quoted epoch 15.",
+        "dataset": "headline_metrics",
+        "sourceId": "run_metrics_sql",
+        "metrics": [
+          {
+            "label": "Baseline quoted C-index",
+            "field": "baseline_quoted_c_index",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "ltsa_quoted_c",
+        "description": "LTSA validation C-index at the quoted early-stopping epoch 45.",
+        "dataset": "headline_metrics",
+        "sourceId": "run_metrics_sql",
+        "metrics": [
+          {
+            "label": "LTSA quoted C-index",
+            "field": "ltsa_quoted_c_index",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "ltsa_selected_c",
+        "description": "LTSA validation C-index at selected epoch 35.",
+        "dataset": "headline_metrics",
+        "sourceId": "run_metrics_sql",
+        "metrics": [
+          {
+            "label": "LTSA selected C-index",
+            "field": "ltsa_selected_c_index",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "ltsa_validation_events",
+        "description": "Observed events supporting the LTSA validation C-index.",
+        "dataset": "headline_metrics",
+        "sourceId": "run_metrics_sql",
+        "metrics": [
+          {
+            "label": "LTSA validation events",
+            "field": "ltsa_validation_events",
+            "format": "number"
+          }
+        ]
+      }
+    ],
+    "charts": [
+      {
+        "id": "validation_c_curve",
+        "title": "Validation C-index by epoch",
+        "subtitle": "Within-run trajectory only; the models use different cohorts and targets.",
+        "type": "line",
+        "dataset": "epoch_curve",
+        "sourceId": "epoch_sql",
+        "encodings": {
+          "x": {
+            "field": "epoch",
+            "type": "quantitative",
+            "label": "Epoch"
+          },
+          "y": {
+            "field": "validation_c_index",
+            "type": "quantitative",
+            "label": "Validation C-index"
+          },
+          "color": {
+            "field": "model",
+            "type": "nominal",
+            "label": "Run"
+          },
+          "tooltip": [
+            {
+              "field": "epoch",
+              "type": "quantitative",
+              "label": "Epoch"
+            },
+            {
+              "field": "validation_c_index",
+              "type": "quantitative",
+              "label": "C-index",
+              "format": "number"
+            }
+          ]
+        },
+        "layout": "full"
+      }
+    ],
+    "tables": [
+      {
+        "id": "run_comparison",
+        "title": "Exact matched runs and selected checkpoints",
+        "subtitle": "Raw loss values are displayed for identification, not cross-model ranking.",
+        "dataset": "run_comparison",
+        "sourceId": "run_metrics_sql",
+        "defaultSort": {
+          "field": "quoted_epoch",
+          "direction": "asc"
+        },
+        "density": "dense",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "model",
+            "label": "Run",
+            "type": "text"
+          },
+          {
+            "field": "quoted_epoch",
+            "label": "Quoted epoch",
+            "type": "number"
+          },
+          {
+            "field": "quoted_validation_loss",
+            "label": "Quoted val loss",
+            "type": "number"
+          },
+          {
+            "field": "quoted_validation_c_index",
+            "label": "Quoted val C",
+            "type": "number"
+          },
+          {
+            "field": "selected_epoch",
+            "label": "Selected epoch",
+            "type": "number"
+          },
+          {
+            "field": "selected_validation_c_index",
+            "label": "Selected val C",
+            "type": "number"
+          },
+          {
+            "field": "test_c_index",
+            "label": "Test C",
+            "type": "number"
+          },
+          {
+            "field": "validation_patients",
+            "label": "Val patients",
+            "type": "number"
+          },
+          {
+            "field": "validation_events",
+            "label": "Val events",
+            "type": "number"
+          },
+          {
+            "field": "validation_comparable_pairs",
+            "label": "Comparable pairs",
+            "type": "number"
+          }
+        ]
+      },
+      {
+        "id": "cohort_support",
+        "title": "Statistical support behind each C-index",
+        "subtitle": "Exact patient, event, and ordered comparable-pair counts.",
+        "dataset": "cohort_support",
+        "sourceId": "cohort_sql",
+        "defaultSort": {
+          "field": "comparable_pairs",
+          "direction": "desc"
+        },
+        "density": "dense",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "model",
+            "label": "Run",
+            "type": "text"
+          },
+          {
+            "field": "split",
+            "label": "Split",
+            "type": "text"
+          },
+          {
+            "field": "patients",
+            "label": "Patients",
+            "type": "number"
+          },
+          {
+            "field": "events",
+            "label": "Events",
+            "type": "number"
+          },
+          {
+            "field": "comparable_pairs",
+            "label": "Comparable pairs",
+            "type": "number"
+          }
+        ]
+      },
+      {
+        "id": "comparability_audit",
+        "title": "Why the logged values are not a paired model comparison",
+        "subtitle": "Differences verified from persisted cohorts and local training code.",
+        "dataset": "comparability_audit",
+        "sourceId": "audit_sql",
+        "defaultSort": {
+          "field": "check",
+          "direction": "asc"
+        },
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "check",
+            "label": "Check",
+            "type": "text"
+          },
+          {
+            "field": "legacy_baseline",
+            "label": "Legacy baseline",
+            "type": "text"
+          },
+          {
+            "field": "ltsa_60m",
+            "label": "LTSA-60",
+            "type": "text"
+          },
+          {
+            "field": "why_it_matters",
+            "label": "Implication",
+            "type": "text"
+          }
+        ]
+      }
+    ],
+    "sources": [
+      {
+        "id": "run_metrics_sql",
+        "label": "Exact matching training runs and checkpoints",
+        "path": "analysis/build_ltsa_metric_diagnostic.py"
+      },
+      {
+        "id": "epoch_sql",
+        "label": "Validation metric trajectories",
+        "path": "analysis/build_ltsa_metric_diagnostic.py"
+      },
+      {
+        "id": "cohort_sql",
+        "label": "Validation/test support and comparable-pair counts",
+        "path": "analysis/build_ltsa_metric_diagnostic.py"
+      },
+      {
+        "id": "audit_sql",
+        "label": "Cohort, scan-timing, and split-overlap audit",
+        "path": "analysis/build_ltsa_metric_diagnostic.py"
+      },
+      {
+        "id": "loss_code",
+        "label": "Local Cox and discrete survival losses",
+        "path": "packages/ltsa/src/ltsa/losses.py"
+      },
+      {
+        "id": "training_code",
+        "label": "Local LTSA loss composition and checkpoint selection",
+        "path": "src/mstat_project/ml/ltsa.py"
+      },
+      {
+        "id": "landmark_code",
+        "label": "Local fixed-landmark cohort and risk score",
+        "path": "src/mstat_project/ml/landmarks.py"
+      },
+      {
+        "id": "baseline_code",
+        "label": "Legacy latest-valid-MRI baseline",
+        "path": "src/mstat_project/ml/baseline.py"
+      },
+      {
+        "id": "comparison_code",
+        "label": "Paired fixed-landmark comparison workflow",
+        "path": "src/mstat_project/ml/compare.py"
+      },
+      {
+        "id": "split_code",
+        "label": "Train/validation/test split generation",
+        "path": "src/mstat_project/data_prep/data_splitting.py"
+      },
+      {
+        "id": "nature_paper",
+        "label": "Zhang et al., Longitudinal transformer for survival analysis",
+        "href": "https://www.nature.com/articles/s41746-024-01207-4"
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# Why the LTSA-60 loss is lower while its C-index is worse\n\nGenerated 2026-07-21T01:25:28Z. Database queries were read-only."
+      },
+      {
+        "id": "headline",
+        "type": "metric-strip",
+        "cardIds": [
+          "baseline_quoted_c",
+          "ltsa_quoted_c",
+          "ltsa_selected_c",
+          "ltsa_validation_events"
+        ]
+      },
+      {
+        "id": "technical_summary",
+        "type": "markdown",
+        "body": "## Technical summary\n\nThe loss values are **not comparable across these runs**. The legacy baseline optimizes an event-averaged Cox partial negative log-likelihood; LTSA optimizes a patient-mean discrete-time survival likelihood plus a small next-visit reconstruction term. Cox loss also grows with risk-set size, so a value around 4–6 is unsurprising for hundreds or thousands of patients. A smaller LTSA loss therefore does not mean a better model.\n\nThe quoted C-indices also come from **different prediction tasks and validation sets**. The baseline evaluates all follow-up from study baseline, while LTSA retains only patients observed beyond month 60 and predicts residual time. The baseline validation set has 396 patients, 41 events, and 6,642 comparable pairs; LTSA has 74, 9, and 382. The LTSA estimate is consequently much noisier.\n\nFinally, neither log line is the selected checkpoint. Baseline selected epoch 12 at validation C-index 0.8211. LTSA selected epoch 35 at 0.6885; epoch 45 is the early-stopping tail, ten non-improving epochs later."
+      },
+      {
+        "id": "run_table",
+        "type": "table",
+        "tableId": "run_comparison"
+      },
+      {
+        "id": "key_findings",
+        "type": "markdown",
+        "body": "## Key findings\n\n- **Likelihood and ranking can move independently.** C-index asks whether patients are ordered correctly; likelihood also judges the probability assigned to event and censoring times. In this LTSA lineage, epoch 20 has lower validation loss (0.9024) but much worse C-index (0.4607) than selected epoch 35 (loss 1.0045, C-index 0.6885).\n- **Month 60 creates a harder, smaller task.** Most early converters disappear. Of the legacy baseline's 41 validation events, 34 occur by month 60 and therefore cannot appear as later events in the fixed-landmark task.\n- **The legacy MRI input is later.** For 495/529 shared patients, the legacy baseline selected a valid MRI after month 60 (median selected month 89.69); LTSA caps its history at month 60. These are valid, generally pre-diagnosis images for converters—not literal post-diagnosis label leakage—but the selection uses patient-specific future follow-up relative to the landmark. That likely makes the legacy task easier; the size of the effect requires a paired rerun.\n- **The split snapshot drifted.** 216/529 shared patients changed split. Only 18/74 LTSA validation patients were also in baseline validation, so the two validation C-indices do not even rank mostly the same people."
+      },
+      {
+        "id": "trajectory",
+        "type": "chart",
+        "chartId": "validation_c_curve"
+      },
+      {
+        "id": "trajectory_read",
+        "type": "markdown",
+        "body": "The trajectory chart is useful only **within each run**. It shows that the quoted LTSA epoch is a degraded endpoint, while its selected checkpoint is materially better. It should not be read as a fair cross-model curve because the cohorts and risk targets differ."
+      },
+      {
+        "id": "scope",
+        "type": "markdown",
+        "body": "## Scope, data, and metric definitions\n\n- **Baseline scope:** legacy run over all 2,636 patients; latest valid MRI across each patient's observed follow-up; outcome clock starts at baseline.\n- **LTSA-60 scope:** 529 patients still observed and event-free through the landmark; longitudinal MRI prefix ends at month 60; outcome is residual time after month 60.\n- **C-index:** both local workflows use the same Harrell pair-ordering implementation and the risk directions are correct. Cox emits log-risk; LTSA uses negative restricted mean survival, so earlier predicted failure means higher risk in both cases.\n- **Loss:** baseline Cox loss is averaged over observed events and depends on the risk sets. LTSA loss is averaged over patients and combines discrete-hazard NLL with auxiliary next-visit MSE. Absolute values cannot be compared across those objectives."
+      },
+      {
+        "id": "cohort_table",
+        "type": "table",
+        "tableId": "cohort_support"
+      },
+      {
+        "id": "audit_table",
+        "type": "table",
+        "tableId": "comparability_audit"
+      },
+      {
+        "id": "paper_alignment",
+        "type": "markdown",
+        "body": "## Methodology and paper alignment\n\nThe local month-60 workflow is an adaptation, not a direct reproduction of the [published LTSA evaluation](https://www.nature.com/articles/s41746-024-01207-4). In the paper, landmark time is an evaluation time for one absolute-time model; risk is horizon-specific conditional incidence, and time-dependent C-index is reported across landmark/horizon combinations. Checkpoints are selected by mean validation C-index across those combinations. The paper's single-image baseline also uses the same discrete survival head/loss as LTSA.\n\nLocally, month 60 defines a separately filtered survivor cohort and residual-time task; LTSA is ranked by a full-follow-up Harrell C-index using negative restricted mean survival, while the quoted legacy baseline uses Cox loss on all follow-up. That difference is statistically meaningful and explains why the paper's loss or C-index expectations cannot be transferred directly to these two log lines."
+      },
+      {
+        "id": "methodology",
+        "type": "markdown",
+        "body": "## Methodology\n\nI matched each four-decimal log line to its persisted epoch row, joined it to run metadata and the selected checkpoint, reconstructed the resumed LTSA epoch lineage, counted exact Harrell-comparable pairs from stored patient snapshots, and audited patient/split/image overlap by `ptid`. All database statements ran in a read-only transaction. I then traced the local Cox loss, LTSA loss composition, fixed-landmark cohort construction, risk score, and checkpoint rules, and compared them with the paper's published methods."
+      },
+      {
+        "id": "limitations",
+        "type": "markdown",
+        "body": "## Limitations and robustness\n\n- This diagnosis compares one legacy baseline run and one resumed LTSA run; it does not estimate run-to-run variation.\n- No uncertainty interval was persisted for either C-index. With only nine LTSA validation events and 382 comparable pairs, a paired bootstrap or repeated seeds is important.\n- The database proves split assignments changed, but not exactly when or why. The split-generation code replaces the table and is order-sensitive, which is a plausible mechanism rather than a proven historical cause.\n- The post-landmark scan audit establishes a temporal input mismatch. Its contribution to the baseline's C-index is an inference until the fixed-landmark baseline is trained on the identical cohort and MRI cutoff."
+      },
+      {
+        "id": "next_steps",
+        "type": "markdown",
+        "body": "## Recommended next steps\n\n1. Run the repository's paired workflow: `uv run python -m mstat_project.ml.compare --landmarks 60`. It freezes one cohort, uses the same split snapshot and month-60 input boundary, aligns test predictions, and computes a paired comparison.\n2. Treat discrimination and likelihood/calibration as separate model-selection views. Report Harrell or time-dependent C-index alongside a horizon-specific Brier score or calibrated NLL; never rank Cox and LTSA by raw loss magnitude.\n3. Persist an immutable split version (or deterministically sort patient IDs before seeded shuffling) so reruns cannot silently reassign patients.\n4. If paper fidelity matters, add the paper's conditional horizon risk and time-dependent C-index at explicit horizons after month 60, then select checkpoints using the same landmark/horizon rule.\n5. Repeat with several seeds and report events, censoring, comparable pairs, and paired bootstrap intervals for every comparison."
+      },
+      {
+        "id": "further_questions",
+        "type": "markdown",
+        "body": "## Further questions\n\n- Does a paired month-60 Cox baseline retain the apparent advantage once it is restricted to the same 529 patients and MRI history?\n- Which horizon matters clinically—12, 24, 60, or 96 months after the landmark? Negative restricted mean survival can hide horizon-specific ranking differences.\n- Are the large LTSA validation swings reproducible across seeds, or primarily a consequence of the nine-event validation sample?\n- Would freezing split manifests and adding a minimum-event rule per landmark materially stabilize model selection?"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-07-21T01:25:28Z",
+    "status": "ready",
+    "datasets": {
+      "headline_metrics": [
+        {
+          "baseline_quoted_c_index": 0.8196326407708522,
+          "ltsa_quoted_c_index": 0.5523560209424084,
+          "ltsa_selected_c_index": 0.6884816753926701,
+          "ltsa_validation_events": 9
+        }
+      ],
+      "run_comparison": [
+        {
+          "model": "Legacy Cox baseline",
+          "run_id": "075f26f2-e43e-452a-9854-08d75fccdce1",
+          "task": "All follow-up; baseline-to-outcome time",
+          "loss_definition": "Event-averaged Cox partial NLL",
+          "quoted_epoch": 15,
+          "quoted_validation_loss": 4.386822700500488,
+          "quoted_validation_c_index": 0.8196326407708522,
+          "selected_epoch": 12,
+          "selected_validation_loss": 4.224240303039551,
+          "selected_validation_c_index": 0.8211382113821138,
+          "test_c_index": 0.8168839230291745,
+          "train_patients": 1843,
+          "validation_patients": 396,
+          "test_patients": 397,
+          "train_events": 187,
+          "validation_events": 41,
+          "test_events": 41,
+          "validation_comparable_pairs": 6642
+        },
+        {
+          "model": "LTSA at 60 months",
+          "run_id": "68f1b6de-f2b0-4faa-a674-e6e19ccc9735",
+          "task": "At risk after month 60; residual time",
+          "loss_definition": "Mean discrete-hazard NLL + next-visit MSE",
+          "quoted_epoch": 45,
+          "quoted_validation_loss": 1.104909886215889,
+          "quoted_validation_c_index": 0.5523560209424084,
+          "selected_epoch": 35,
+          "selected_validation_loss": 1.0044699928446397,
+          "selected_validation_c_index": 0.6884816753926701,
+          "test_c_index": 0.6170798898071626,
+          "train_patients": 379,
+          "validation_patients": 74,
+          "test_patients": 76,
+          "train_events": 38,
+          "validation_events": 9,
+          "test_events": 8,
+          "validation_comparable_pairs": 382
+        }
+      ],
+      "epoch_curve": [
+        {
+          "model": "Legacy Cox baseline",
+          "epoch": 1,
+          "validation_loss": 4.959000587463379,
+          "validation_c_index": 0.43676603432700994
+        },
+        {
+          "model": "Legacy Cox baseline",
+          "epoch": 2,
+          "validation_loss": 4.9028191566467285,
+          "validation_c_index": 0.59741041854863
+        },
+        {
+          "model": "Legacy Cox baseline",
+          "epoch": 3,
+          "validation_loss": 4.914107799530029,
+          "validation_c_index": 0.5674495633845227
+        },
+        {
+          "model": "Legacy Cox baseline",
+          "epoch": 4,
+          "validation_loss": 8.226853370666504,
+          "validation_c_index": 0.2926829268292683
+        },
+        {
+          "model": "Legacy Cox baseline",
+          "epoch": 5,
+          "validation_loss": 5.870288372039795,
+          "validation_c_index": 0.3751881963264077
+        },
+        {
+          "model": "Legacy Cox baseline",
+          "epoch": 6,
+          "validation_loss": 4.88588285446167,
+          "validation_c_index": 0.6791629027401385
+        },
+        {
+          "model": "Legacy Cox baseline",
+          "epoch": 7,
+          "validation_loss": 4.774179935455322,
+          "validation_c_index": 0.6970791930141523
+        },
+        {
+          "model": "Legacy Cox baseline",
+          "epoch": 8,
+          "validation_loss": 5.173268795013428,
+          "validation_c_index": 0.7573020174646191
+        },
+        {
+          "model": "Legacy Cox baseline",
+          "epoch": 9,
+          "validation_loss": 4.584946632385254,
+          "validation_c_index": 0.7749171936163806
+        },
+        {
+          "model": "Legacy Cox baseline",
+          "epoch": 10,
+          "validation_loss": 4.586215019226074,
+          "validation_c_index": 0.805028605841614
+        },
+        {
+          "model": "Legacy Cox baseline",
+          "epoch": 11,
+          "validation_loss": 4.524956226348877,
+          "validation_c_index": 0.767991568804577
+        },
+        {
+          "model": "Legacy Cox baseline",
+          "epoch": 12,
+          "validation_loss": 4.224240303039551,
+          "validation_c_index": 0.8211382113821138
+        },
+        {
+          "model": "Legacy Cox baseline",
+          "epoch": 13,
+          "validation_loss": 4.5121941566467285,
+          "validation_c_index": 0.8127070159590485
+        },
+        {
+          "model": "Legacy Cox baseline",
+          "epoch": 14,
+          "validation_loss": 4.312868595123291,
+          "validation_c_index": 0.8040499849442939
+        },
+        {
+          "model": "Legacy Cox baseline",
+          "epoch": 15,
+          "validation_loss": 4.386822700500488,
+          "validation_c_index": 0.8196326407708522
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 1,
+          "validation_loss": 0.8894319994425451,
+          "validation_c_index": 0.2670157068062827
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 2,
+          "validation_loss": 0.9223413474958491,
+          "validation_c_index": 0.468586387434555
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 3,
+          "validation_loss": 0.8240263544375429,
+          "validation_c_index": 0.6151832460732984
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 4,
+          "validation_loss": 0.8567499230439598,
+          "validation_c_index": 0.5287958115183246
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 5,
+          "validation_loss": 0.8523304972394898,
+          "validation_c_index": 0.6073298429319371
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 6,
+          "validation_loss": 0.939515861745521,
+          "validation_c_index": 0.6413612565445026
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 7,
+          "validation_loss": 0.9634781286900712,
+          "validation_c_index": 0.5
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 8,
+          "validation_loss": 0.8979241224760944,
+          "validation_c_index": 0.4005235602094241
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 9,
+          "validation_loss": 0.966643846417601,
+          "validation_c_index": 0.39790575916230364
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 10,
+          "validation_loss": 0.9920764198350543,
+          "validation_c_index": 0.3769633507853403
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 11,
+          "validation_loss": 0.9216970983842337,
+          "validation_c_index": 0.4397905759162304
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 12,
+          "validation_loss": 0.9578960851539631,
+          "validation_c_index": 0.49214659685863876
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 13,
+          "validation_loss": 0.8596596960481759,
+          "validation_c_index": 0.6047120418848168
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 14,
+          "validation_loss": 0.9518008048746835,
+          "validation_c_index": 0.4162303664921466
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 15,
+          "validation_loss": 0.89418337411071,
+          "validation_c_index": 0.4319371727748691
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 16,
+          "validation_loss": 1.0014790053278007,
+          "validation_c_index": 0.3743455497382199
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 17,
+          "validation_loss": 0.953992990248308,
+          "validation_c_index": 0.39267015706806285
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 18,
+          "validation_loss": 0.9810788325046668,
+          "validation_c_index": 0.42670157068062825
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 19,
+          "validation_loss": 0.9357644507057361,
+          "validation_c_index": 0.3717277486910995
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 20,
+          "validation_loss": 0.9024080079350922,
+          "validation_c_index": 0.4607329842931937
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 21,
+          "validation_loss": 0.9377892382090559,
+          "validation_c_index": 0.49476439790575916
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 22,
+          "validation_loss": 1.0167713106257488,
+          "validation_c_index": 0.5026178010471204
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 23,
+          "validation_loss": 1.0108611366107456,
+          "validation_c_index": 0.4816753926701571
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 24,
+          "validation_loss": 0.9696159108818786,
+          "validation_c_index": 0.48429319371727747
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 25,
+          "validation_loss": 0.9935858360038617,
+          "validation_c_index": 0.4816753926701571
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 26,
+          "validation_loss": 1.0396154944130496,
+          "validation_c_index": 0.5209424083769634
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 27,
+          "validation_loss": 0.9875195555993028,
+          "validation_c_index": 0.6361256544502618
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 28,
+          "validation_loss": 1.010069580031307,
+          "validation_c_index": 0.42408376963350786
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 29,
+          "validation_loss": 0.9206464549123838,
+          "validation_c_index": 0.5602094240837696
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 30,
+          "validation_loss": 1.0019362698988736,
+          "validation_c_index": 0.48429319371727747
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 31,
+          "validation_loss": 0.9740961307307353,
+          "validation_c_index": 0.46596858638743455
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 32,
+          "validation_loss": 1.0511415237812578,
+          "validation_c_index": 0.450261780104712
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 33,
+          "validation_loss": 1.0181996623633076,
+          "validation_c_index": 0.5078534031413613
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 34,
+          "validation_loss": 1.0228729654808302,
+          "validation_c_index": 0.46596858638743455
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 35,
+          "validation_loss": 1.0044699928446397,
+          "validation_c_index": 0.6884816753926701
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 36,
+          "validation_loss": 1.0163762155366507,
+          "validation_c_index": 0.56282722513089
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 37,
+          "validation_loss": 0.9887906382036572,
+          "validation_c_index": 0.5732984293193717
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 38,
+          "validation_loss": 1.0214542250551686,
+          "validation_c_index": 0.6858638743455497
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 39,
+          "validation_loss": 1.0476351550251648,
+          "validation_c_index": 0.5340314136125655
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 40,
+          "validation_loss": 1.0514525242300856,
+          "validation_c_index": 0.4816753926701571
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 41,
+          "validation_loss": 1.0574798818702835,
+          "validation_c_index": 0.5235602094240838
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 42,
+          "validation_loss": 1.0770798461964808,
+          "validation_c_index": 0.4581151832460733
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 43,
+          "validation_loss": 1.0197279235046055,
+          "validation_c_index": 0.518324607329843
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 44,
+          "validation_loss": 1.0752997812940865,
+          "validation_c_index": 0.6465968586387435
+        },
+        {
+          "model": "LTSA at 60 months",
+          "epoch": 45,
+          "validation_loss": 1.104909886215889,
+          "validation_c_index": 0.5523560209424084
+        }
+      ],
+      "cohort_support": [
+        {
+          "model": "Legacy Cox baseline",
+          "split": "validation",
+          "patients": 396,
+          "events": 41,
+          "comparable_pairs": 6642
+        },
+        {
+          "model": "LTSA at 60 months",
+          "split": "validation",
+          "patients": 74,
+          "events": 9,
+          "comparable_pairs": 382
+        },
+        {
+          "model": "Legacy Cox baseline",
+          "split": "test",
+          "patients": 397,
+          "events": 41,
+          "comparable_pairs": 6444
+        },
+        {
+          "model": "LTSA at 60 months",
+          "split": "test",
+          "patients": 76,
+          "events": 8,
+          "comparable_pairs": 363
+        }
+      ],
+      "comparability_audit": [
+        {
+          "check": "Loss optimized",
+          "legacy_baseline": "Event-averaged Cox partial NLL",
+          "ltsa_60m": "Patient-mean discrete NLL + auxiliary MSE",
+          "why_it_matters": "The numeric loss scales have no common zero or denominator."
+        },
+        {
+          "check": "Population and clock",
+          "legacy_baseline": "2,636 patients; time from baseline",
+          "ltsa_60m": "529 month-60 survivors; residual time after month 60",
+          "why_it_matters": "LTSA excludes early converters and answers a later, smaller task."
+        },
+        {
+          "check": "MRI information boundary",
+          "legacy_baseline": "Latest valid MRI across follow-up",
+          "ltsa_60m": "MRI history capped at month 60",
+          "why_it_matters": "495/529 shared patients use a post-landmark legacy scan."
+        },
+        {
+          "check": "Validation identities",
+          "legacy_baseline": "Historical split snapshot",
+          "ltsa_60m": "Current split snapshot",
+          "why_it_matters": "Only 18/74 LTSA validation patients were baseline validation patients."
+        },
+        {
+          "check": "Risk summarized for C-index",
+          "legacy_baseline": "Cox log-risk",
+          "ltsa_60m": "Negative restricted mean survival",
+          "why_it_matters": "Both signs are correct, but the scores target different summaries."
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "run_metrics_sql",
+      "label": "Exact matching training runs and checkpoints",
+      "path": "analysis/build_ltsa_metric_diagnostic.py",
+      "query": {
+        "engine": "PostgreSQL",
+        "sql": "WITH baseline AS (\n    SELECT\n        'Legacy Cox baseline'::text AS model,\n        r.run_id::text AS run_id,\n        'All follow-up; baseline-to-outcome time'::text AS task,\n        'Event-averaged Cox partial NLL'::text AS loss_definition,\n        quoted.epoch AS quoted_epoch,\n        quoted.validation_loss::double precision AS quoted_validation_loss,\n        quoted.validation_c_index::double precision AS quoted_validation_c_index,\n        r.best_epoch AS selected_epoch,\n        selected.validation_loss::double precision AS selected_validation_loss,\n        selected.validation_c_index::double precision AS selected_validation_c_index,\n        r.test_c_index::double precision AS test_c_index,\n        r.train_patients,\n        r.validation_patients,\n        r.test_patients,\n        r.train_events,\n        r.validation_events,\n        r.test_events\n    FROM _ml.baseline_runs AS r\n    JOIN _ml.baseline_epoch_metrics AS quoted\n      ON quoted.run_id = r.run_id AND quoted.epoch = 15\n    JOIN _ml.baseline_epoch_metrics AS selected\n      ON selected.run_id = r.run_id AND selected.epoch = r.best_epoch\n    WHERE r.run_id = :baseline_run_id\n), ltsa AS (\n    SELECT\n        'LTSA at 60 months'::text AS model,\n        r.run_id::text AS run_id,\n        'At risk after month 60; residual time'::text AS task,\n        'Mean discrete-hazard NLL + next-visit MSE'::text AS loss_definition,\n        quoted.epoch AS quoted_epoch,\n        quoted.validation_total_loss::double precision AS quoted_validation_loss,\n        quoted.validation_c_index::double precision AS quoted_validation_c_index,\n        r.best_epoch AS selected_epoch,\n        selected.validation_total_loss::double precision AS selected_validation_loss,\n        selected.validation_c_index::double precision AS selected_validation_c_index,\n        r.test_c_index::double precision AS test_c_index,\n        r.train_patients,\n        r.validation_patients,\n        r.test_patients,\n        r.train_events,\n        r.validation_events,\n        r.test_events\n    FROM _ml.survival_runs AS r\n    JOIN _ml.survival_epoch_metrics AS quoted\n      ON quoted.run_id = r.run_id AND quoted.epoch = 45\n    JOIN _ml.survival_epoch_metrics AS selected\n      ON selected.run_id = r.run_id AND selected.epoch = r.best_epoch\n    WHERE r.run_id = :ltsa_run_id\n)\nSELECT * FROM baseline\nUNION ALL\nSELECT * FROM ltsa\nORDER BY quoted_epoch",
+        "description": "Matches the two quoted epoch lines and loads selected-checkpoint metrics.",
+        "executed_at": "2026-07-21T01:25:28Z",
+        "tables_used": [
+          "_ml.baseline_runs",
+          "_ml.baseline_epoch_metrics",
+          "_ml.survival_runs",
+          "_ml.survival_epoch_metrics"
+        ],
+        "metric_definitions": [
+          "Quoted C-index is the validation Harrell C-index stored for the logged epoch.",
+          "Selected checkpoint is the persisted best_epoch for each run."
+        ]
+      }
+    },
+    {
+      "id": "epoch_sql",
+      "label": "Validation metric trajectories",
+      "path": "analysis/build_ltsa_metric_diagnostic.py",
+      "query": {
+        "engine": "PostgreSQL",
+        "sql": "SELECT\n    'Legacy Cox baseline'::text AS model,\n    epoch,\n    validation_loss::double precision AS validation_loss,\n    validation_c_index::double precision AS validation_c_index\nFROM _ml.baseline_epoch_metrics\nWHERE run_id = :baseline_run_id\nUNION ALL\nSELECT\n    'LTSA at 60 months'::text AS model,\n    epoch,\n    validation_total_loss::double precision AS validation_loss,\n    validation_c_index::double precision AS validation_c_index\nFROM _ml.survival_epoch_metrics\nWHERE run_id IN (:ltsa_source_run_id, :ltsa_run_id)\nORDER BY model, epoch",
+        "description": "Loads the baseline curve and the complete resumed LTSA lineage.",
+        "executed_at": "2026-07-21T01:25:28Z",
+        "tables_used": [
+          "_ml.baseline_epoch_metrics",
+          "_ml.survival_epoch_metrics"
+        ],
+        "metric_definitions": []
+      }
+    },
+    {
+      "id": "cohort_sql",
+      "label": "Validation/test support and comparable-pair counts",
+      "path": "analysis/build_ltsa_metric_diagnostic.py",
+      "query": {
+        "engine": "PostgreSQL",
+        "sql": "WITH cohorts AS (\n    SELECT\n        'Legacy Cox baseline'::text AS model,\n        ptid,\n        split,\n        observed_time_months,\n        event_observed\n    FROM _ml.baseline_run_patients\n    WHERE run_id = :baseline_run_id\n    UNION ALL\n    SELECT\n        'LTSA at 60 months'::text AS model,\n        ptid,\n        split,\n        observed_time_months,\n        event_observed\n    FROM _ml.survival_run_patients\n    WHERE run_id = :ltsa_run_id\n), counts AS (\n    SELECT\n        model,\n        split,\n        count(*) AS patients,\n        count(*) FILTER (WHERE event_observed) AS events\n    FROM cohorts\n    WHERE split IN ('validation', 'test')\n    GROUP BY model, split\n), pairs AS (\n    SELECT\n        earlier.model,\n        earlier.split,\n        count(*) AS comparable_pairs\n    FROM cohorts AS earlier\n    JOIN cohorts AS later\n      ON later.model = earlier.model\n     AND later.split = earlier.split\n     AND earlier.event_observed\n     AND earlier.observed_time_months < later.observed_time_months\n    WHERE earlier.split IN ('validation', 'test')\n    GROUP BY earlier.model, earlier.split\n)\nSELECT counts.model, counts.split, counts.patients, counts.events,\n       pairs.comparable_pairs\nFROM counts\nJOIN pairs USING (model, split)\nORDER BY counts.split DESC, counts.model",
+        "description": "Counts patients, observed events, and ordered Harrell-comparable pairs.",
+        "executed_at": "2026-07-21T01:25:28Z",
+        "tables_used": [
+          "_ml.baseline_run_patients",
+          "_ml.survival_run_patients"
+        ],
+        "metric_definitions": [
+          "An ordered pair is comparable when the shorter observed time is an event."
+        ]
+      }
+    },
+    {
+      "id": "audit_sql",
+      "label": "Cohort, scan-timing, and split-overlap audit",
+      "path": "analysis/build_ltsa_metric_diagnostic.py",
+      "query": {
+        "engine": "PostgreSQL",
+        "sql": "WITH shared AS (\n    SELECT\n        legacy.ptid,\n        legacy.split AS baseline_split,\n        ltsa.split AS ltsa_split,\n        legacy.image_id AS baseline_image_id,\n        ltsa.selected_image_id AS ltsa_image_id,\n        legacy.observed_time_months AS baseline_observed_time,\n        legacy.event_observed AS baseline_event,\n        images.months_since_baseline_image::double precision AS baseline_scan_month\n    FROM _ml.survival_run_patients AS ltsa\n    JOIN _ml.baseline_run_patients AS legacy\n      ON legacy.run_id = :baseline_run_id\n     AND legacy.ptid = ltsa.ptid\n    JOIN _core.core_image_set AS images\n      ON images.ptid = legacy.ptid\n     AND images.image_id::text = legacy.image_id\n    WHERE ltsa.run_id = :ltsa_run_id\n), all_baseline_scans AS (\n    SELECT\n        patients.observed_time_months,\n        images.months_since_baseline_image::double precision AS scan_month\n    FROM _ml.baseline_run_patients AS patients\n    JOIN _core.core_image_set AS images\n      ON images.ptid = patients.ptid\n     AND images.image_id::text = patients.image_id\n    WHERE patients.run_id = :baseline_run_id\n), baseline_scan_correlation AS (\n    SELECT corr(scan_month, observed_time_months) AS value\n    FROM all_baseline_scans\n), baseline_early_events AS (\n    SELECT count(*) AS value\n    FROM _ml.baseline_run_patients\n    WHERE run_id = :baseline_run_id\n      AND split = 'validation'\n      AND event_observed\n      AND observed_time_months <= 60\n)\nSELECT\n    count(*) AS shared_patients,\n    count(*) FILTER (WHERE baseline_image_id = ltsa_image_id) AS same_selected_image,\n    count(*) FILTER (WHERE baseline_scan_month > 60) AS baseline_scans_after_month_60,\n    percentile_cont(0.5) WITHIN GROUP (ORDER BY baseline_scan_month)\n        AS median_baseline_scan_month,\n    count(*) FILTER (WHERE baseline_split <> ltsa_split) AS changed_split,\n    count(*) FILTER (\n        WHERE ltsa_split = 'validation' AND baseline_split = 'validation'\n    ) AS ltsa_validation_also_baseline_validation,\n    count(*) FILTER (WHERE ltsa_split = 'validation') AS ltsa_validation_patients,\n    max(baseline_early_events.value) AS baseline_validation_events_by_month_60,\n    max(baseline_scan_correlation.value) AS full_baseline_scan_outcome_correlation\nFROM shared\nCROSS JOIN baseline_scan_correlation\nCROSS JOIN baseline_early_events\nGROUP BY ()",
+        "description": "Audits shared patients, selected MRI timing, and persisted split assignments.",
+        "executed_at": "2026-07-21T01:25:28Z",
+        "tables_used": [
+          "_ml.baseline_run_patients",
+          "_ml.survival_run_patients",
+          "_core.core_image_set"
+        ],
+        "metric_definitions": []
+      }
+    },
+    {
+      "id": "loss_code",
+      "label": "Local Cox and discrete survival losses",
+      "path": "packages/ltsa/src/ltsa/losses.py"
+    },
+    {
+      "id": "training_code",
+      "label": "Local LTSA loss composition and checkpoint selection",
+      "path": "src/mstat_project/ml/ltsa.py"
+    },
+    {
+      "id": "landmark_code",
+      "label": "Local fixed-landmark cohort and risk score",
+      "path": "src/mstat_project/ml/landmarks.py"
+    },
+    {
+      "id": "baseline_code",
+      "label": "Legacy latest-valid-MRI baseline",
+      "path": "src/mstat_project/ml/baseline.py"
+    },
+    {
+      "id": "comparison_code",
+      "label": "Paired fixed-landmark comparison workflow",
+      "path": "src/mstat_project/ml/compare.py"
+    },
+    {
+      "id": "split_code",
+      "label": "Train/validation/test split generation",
+      "path": "src/mstat_project/data_prep/data_splitting.py"
+    },
+    {
+      "id": "nature_paper",
+      "label": "Zhang et al., Longitudinal transformer for survival analysis",
+      "href": "https://www.nature.com/articles/s41746-024-01207-4"
+    }
+  ]
+}

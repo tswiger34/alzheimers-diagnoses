@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 import torch
 from ltsa.ltsa_model import LTSA
 from torch.utils.data import DataLoader
@@ -11,7 +12,13 @@ from mstat_project.ml.landmarks import (
     LandmarkSequenceDataset,
     collate_landmark_samples,
 )
-from mstat_project.ml.ltsa import LTSATrainingConfig, _run_epoch, save_ltsa_checkpoint
+from mstat_project.ml.ltsa import (
+    LTSATrainingConfig,
+    _parse_args,
+    _run_epoch,
+    restore_ltsa_checkpoint,
+    save_ltsa_checkpoint,
+)
 from mstat_project.ml.results import EpochMetrics
 
 
@@ -145,3 +152,116 @@ def test_tiny_ltsa_and_baseline_complete_training_epochs(tmp_path: Path) -> None
     assert checkpoint["run_id"] == "test-run"
     assert checkpoint["time_grid"]["n_time_bins"] == grid.n_time_bins
     assert set(checkpoint["model_state_dict"]) == set(ltsa.state_dict())
+
+
+def test_restore_ltsa_checkpoint_restores_training_state_and_current_optimizer_config(
+    tmp_path: Path,
+) -> None:
+    source_model = torch.nn.Linear(2, 1)
+    source_optimizer = torch.optim.AdamW(source_model.parameters(), lr=1e-3, weight_decay=1e-4)
+    loss = source_model(torch.randn(2, 2)).square().mean()
+    loss.backward()
+    source_optimizer.step()
+    grid = DiscreteTimeGrid(bin_width_months=6.0, n_time_bins=4)
+    checkpoint_path = tmp_path / "epoch_010.pt"
+    metrics = EpochMetrics(
+        epoch=10,
+        train_total_loss=0.4,
+        train_survival_loss=0.3,
+        train_auxiliary_loss=0.1,
+        train_c_index=0.6,
+        validation_total_loss=0.25,
+        validation_survival_loss=0.2,
+        validation_auxiliary_loss=0.05,
+        validation_c_index=0.7,
+        learning_rate=1e-3,
+        checkpoint_path=checkpoint_path,
+    )
+    save_ltsa_checkpoint(
+        checkpoint_path,
+        run_id="source-run",
+        epoch=10,
+        model=source_model,  # type: ignore[arg-type]
+        optimizer=source_optimizer,
+        config=LTSATrainingConfig(epochs=10),
+        grid=grid,
+        metrics=metrics,
+    )
+
+    restored_model = torch.nn.Linear(2, 1)
+    restored_optimizer = torch.optim.AdamW(restored_model.parameters(), lr=2e-3, weight_decay=2e-4)
+    epoch, restored_metrics = restore_ltsa_checkpoint(
+        checkpoint_path,
+        model=restored_model,
+        optimizer=restored_optimizer,
+        grid=grid,
+        device=torch.device("cpu"),
+        learning_rate=2e-3,
+        weight_decay=2e-4,
+    )
+
+    assert epoch == 10
+    assert restored_metrics["validation_total_loss"] == pytest.approx(0.25)
+    assert restored_metrics["validation_c_index"] == pytest.approx(0.7)
+    for expected, actual in zip(source_model.parameters(), restored_model.parameters(), strict=True):
+        torch.testing.assert_close(actual, expected)
+    assert restored_optimizer.state
+    assert restored_optimizer.param_groups[0]["lr"] == pytest.approx(2e-3)
+    assert restored_optimizer.param_groups[0]["weight_decay"] == pytest.approx(2e-4)
+
+
+def test_restore_ltsa_checkpoint_rejects_mismatched_time_grid(tmp_path: Path) -> None:
+    model = torch.nn.Linear(2, 1)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    checkpoint_path = tmp_path / "epoch_001.pt"
+    save_ltsa_checkpoint(
+        checkpoint_path,
+        run_id="source-run",
+        epoch=1,
+        model=model,  # type: ignore[arg-type]
+        optimizer=optimizer,
+        config=LTSATrainingConfig(epochs=1),
+        grid=DiscreteTimeGrid(bin_width_months=6.0, n_time_bins=4),
+        metrics=EpochMetrics(
+            epoch=1,
+            train_total_loss=0.4,
+            train_survival_loss=0.3,
+            train_auxiliary_loss=0.1,
+            train_c_index=0.6,
+            validation_total_loss=0.25,
+            validation_survival_loss=0.2,
+            validation_auxiliary_loss=0.05,
+            validation_c_index=0.7,
+            learning_rate=1e-3,
+            checkpoint_path=checkpoint_path,
+        ),
+    )
+
+    restored_model = torch.nn.Linear(2, 1)
+    restored_optimizer = torch.optim.AdamW(restored_model.parameters(), lr=1e-3)
+    with pytest.raises(ValueError, match="does not match the current training grid"):
+        restore_ltsa_checkpoint(
+            checkpoint_path,
+            model=restored_model,
+            optimizer=restored_optimizer,
+            grid=DiscreteTimeGrid(bin_width_months=3.0, n_time_bins=4),
+            device=torch.device("cpu"),
+            learning_rate=1e-3,
+            weight_decay=1e-4,
+        )
+
+
+def test_ltsa_training_config_rejects_missing_resume_checkpoint(tmp_path: Path) -> None:
+    config = LTSATrainingConfig(resume_from=tmp_path / "missing.pt")
+
+    with pytest.raises(FileNotFoundError, match="Resume checkpoint does not exist"):
+        config.validate()
+
+
+def test_parse_args_accepts_resume_checkpoint(tmp_path: Path) -> None:
+    checkpoint_path = tmp_path / "epoch_010.pt"
+
+    args = _parse_args(["--resume-from", str(checkpoint_path), "--epochs", "20"])
+
+    assert args.resume_from == checkpoint_path
+    assert args.epochs == 20

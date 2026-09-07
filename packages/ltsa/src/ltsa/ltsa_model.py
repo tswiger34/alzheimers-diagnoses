@@ -101,7 +101,7 @@ class LTSA(torch.nn.Module):
         self.classifier = torch.nn.Sequential(
             torch.nn.Dropout(p=dropout),
             torch.nn.Linear(img_encoder.n_features, n_time_bins),
-            torch.nn.Sigmoid(),
+            torch.nn.Softplus(),
         )
         self.step_ahead_predictor = torch.nn.Sequential(
             torch.nn.Dropout(p=dropout),

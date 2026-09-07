@@ -4,7 +4,7 @@ __pycache__/
 *$py.class
 src/**/original_files
 /**/seeds/*.csv
-
+*.png
 # C extensions
 *.so
 notebooks/**/*.ipynb

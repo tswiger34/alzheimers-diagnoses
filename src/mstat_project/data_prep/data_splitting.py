@@ -18,10 +18,7 @@ def get_core_img_set() -> pl.DataFrame:
     ptid_tensors = [f.split(".")[0] for f in tensor_files]
 
     with get_db_engine().connect() as conn:
-        base_df = pl.read_database(
-            "SELECT * FROM core_image_set",
-            conn,
-        )
+        base_df = pl.read_database("SELECT * FROM _core.core_image_set", conn, infer_schema_length=None)
     patients = (
         base_df.group_by("ptid")
         .agg(
