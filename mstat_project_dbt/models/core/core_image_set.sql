@@ -60,8 +60,15 @@ get_bkts AS (
     FROM bl_diff_months AS diff
     INNER JOIN {{ ref('core_follow_up_buckets') }} AS bkts
         ON 
-            diff.months_since_baseline_image >= bkts.follow_up_start 
-            AND diff.months_since_baseline_image < bkts.follow_up_end
+            (
+                diff.months_since_baseline_image >= bkts.follow_up_start 
+                AND diff.months_since_baseline_image < bkts.follow_up_end
+                AND diff.days_since_baseline_image > 0
+            )
+            OR (
+                diff.days_since_baseline_image = 0
+                AND bkts.visit_code = 'BL'
+            )
 ),
 
 rk_bkt_imgs AS (
@@ -184,14 +191,49 @@ SELECT
     image_id,
     ptid,
     image_date,
+    visit_num,
     visit_code,
-    cohort,
-    protocol_name,
     study_phase,
+    ptid_img_number,
+    n_ptid_imgs,
+    days_since_baseline_image,
+    months_since_baseline_image,
+    COALESCE(days_since_prior_image, 0) AS days_since_prior_image,
+    COALESCE(months_since_prior_image, 0) AS months_since_prior_image,
+    change_from_baseline,
+    change_from_prior_visit,
+    months_to_ad_from_image,
+    months_to_ad_from_baseline,
+    processing_set_cohort,
+    diagnosis_code_at_visit,
+    diagnosis_at_visit,
+    dx_valid_from,
+    dx_valid_to,
+    is_ad_at_visit,
+    prior_diagnosis,
+    prior_diagnosis_code,
+    baseline_diagnosis,
+    baseline_image_date,
+    first_ad_diagnosis,
+    final_diagnosis,
+    final_image_date,
+    time_to_ad_from_image,
+    time_to_ad_from_baseline,
+    is_ad_at_baseline,
+    change_from_prior_visit_code,
+    is_censored,
+    cohort,
+    mri_is_valid,
+    pt_birth_date,
+    pt_marital_status,
+    pt_education_years,
+    age_at_baseline,
+    age_at_image,
     image_type,
     series_type,
     mri_manufacturer,
     modality,
+    protocol_name,
     acquisition_time,
     acquisition_number,
     acquisition_type,
@@ -208,41 +250,7 @@ SELECT
     is_3d_distortion_corrected,
     is_2d_distortion_corrected,
     is_not_distortion_corrected,
-    is_magnitude_image,
-    n_ptid_imgs,
-    COALESCE(days_since_prior_image, 0) AS days_since_prior_image,
-    days_since_baseline_image,
-    processing_set_cohort,
-    ptid_img_number,
-    diagnosis_code_at_visit,
-    diagnosis_at_visit,
-    dx_valid_from,
-    dx_valid_to,
-    is_ad_at_visit,
-    months_since_baseline_image,
-    COALESCE(months_since_prior_image, 0) AS months_since_prior_image,
-    prior_diagnosis,
-    prior_diagnosis_code,
-    baseline_diagnosis,
-    baseline_image_date,
-    first_ad_diagnosis,
-    final_diagnosis,
-    final_image_date,
-    time_to_ad_from_image,
-    time_to_ad_from_baseline,
-    is_ad_at_baseline,
-    change_from_prior_visit,
-    change_from_prior_visit_code,
-    change_from_baseline,
-    is_censored,
-    mri_is_valid,
-    pt_birth_date,
-    pt_marital_status,
-    pt_education_years,
-    age_at_baseline,
-    age_at_image,
-    months_to_ad_from_image,
-    months_to_ad_from_baseline
+    is_magnitude_image
 FROM get_ptid_info
 WHERE
     NOT is_ad_at_baseline

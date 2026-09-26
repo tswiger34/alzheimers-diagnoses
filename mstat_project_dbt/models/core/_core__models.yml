@@ -163,6 +163,9 @@ models:
         - type: btree
           unique: true
           columns: [ptid, image_date]
+        - type: btree
+          unique: true
+          columns: [ptid, visit_num]
 
     columns:
       - name: ptid_visit_date
