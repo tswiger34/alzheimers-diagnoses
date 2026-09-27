@@ -8,6 +8,8 @@ src/**/original_files
 # C extensions
 *.so
 notebooks/**/*.ipynb
+!notebooks/data_splitting.ipynb
+!notebooks/data_viz.ipynb
 # Distribution / packaging
 .Python
 build/

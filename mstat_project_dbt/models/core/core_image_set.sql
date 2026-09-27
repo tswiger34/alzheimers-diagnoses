@@ -89,8 +89,7 @@ image_set_cohorts AS (
         *,
         image_date - LAG(image_date) OVER (PARTITION BY ptid ORDER BY image_date) AS days_since_prior_image,
         NTILE(10) OVER (ORDER BY ptid, image_date, image_id) AS processing_set_cohort,
-        ROW_NUMBER() OVER (PARTITION BY ptid ORDER BY image_date, image_id) AS ptid_img_number,
-        COUNT(*) OVER (PARTITION BY ptid) AS n_ptid_imgs
+        ROW_NUMBER() OVER (PARTITION BY ptid ORDER BY image_date, image_id) AS ptid_img_number
     FROM assign_bkt
 ),
 
@@ -195,7 +194,7 @@ SELECT
     visit_code,
     study_phase,
     ptid_img_number,
-    n_ptid_imgs,
+    COUNT(*) OVER (PARTITION BY ptid) AS n_ptid_imgs,
     days_since_baseline_image,
     months_since_baseline_image,
     COALESCE(days_since_prior_image, 0) AS days_since_prior_image,

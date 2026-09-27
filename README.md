@@ -18,6 +18,39 @@ The shared MRI encoder converts each volume to axial, coronal, and sagittal cent
 
 ## Training
 
+### Cohort preparation and exploration
+
+Run these notebooks in order using the project Python environment:
+
+1. [`notebooks/data_splitting.ipynb`](notebooks/data_splitting.ipynb) validates the
+   baseline-relative bins from `_core.core_image_set` and `_core.core_follow_up_buckets`,
+   keeps patients with tensor files, and assigns whole patients to 70% train / 15%
+   validation / 15% test groups. It balances retained-image counts within baseline
+   diagnosis and censoring strata with seed 42. `WRITE_SPLITS=True` updates
+   `_raw.train_test_split`; set it to `False` for a preview.
+2. [`notebooks/data_viz.ipynb`](notebooks/data_viz.ipynb) reads those saved assignments,
+   verifies source hashes, and renders cohort summaries, scheduled-bin coverage,
+   actual timing offsets, diagnoses, demographics, MRI metadata, and Table 1.
+   It does not write split assignments. Historical experiment diagnostics are optional
+   and explicitly separate from the refreshed cohort.
+
+The split notebook archives prior assignments, selected cohort rows, the schedule,
+and provenance under `data/artifacts/data_splits/`; keep these local artifacts to
+reproduce or restore an assignment. The visualization notebook requires its
+`latest.json` manifest. After a source change, rerun splitting before visualization.
+Tensor-file eligibility checks existence only; selected image IDs and tensor contents
+must still agree before training. Visit codes represent scheduled bins, while actual
+acquisition times continue to determine prediction-time eligibility.
+
+To execute and save both notebooks from the repository root:
+
+```powershell
+uv run jupyter nbconvert --execute --to notebook --inplace notebooks/data_splitting.ipynb
+uv run jupyter nbconvert --execute --to notebook --inplace notebooks/data_viz.ipynb
+```
+
+### Model commands
+
 Install the workspace and verify the command-line entry points:
 
 ```powershell

@@ -33,6 +33,9 @@ dependencies = [
 [dependency-groups]
 dev = [
     "ipykernel>=7.2.0",
+    "nbclient>=0.11.0",
+    "nbconvert>=7.17.1",
+    "nbformat>=5.11.1",
     "pandas>=3.0.1",
     "pyarrow>=23.0.1",
     "pytest>=9.0.2",
