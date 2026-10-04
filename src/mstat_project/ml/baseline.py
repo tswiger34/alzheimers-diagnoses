@@ -1,4 +1,10 @@
-"""Patient-level single-MRI Cox survival baseline.
+"""Train continuous single-MRI baselines A and B.
+
+The CLI defaults to the shared continuous-survival pipeline. Use ``--legacy``
+to run the historical Cox implementation described below. Its Python APIs
+remain available for reproducing old experiments.
+
+Legacy patient-level single-MRI Cox survival baseline:
 
 The baseline uses exactly one MRI and one outcome per patient.  For patients
 who convert to Alzheimer's disease (AD), the image is the final eligible MRI
@@ -8,17 +14,17 @@ to AD diagnosis or censoring.
 
 Run with::
 
-    python -m mstat_project.ml.baseline --epochs 10 --batch-size 2
+    python -m mstat_project.ml.baseline --legacy --epochs 10 --batch-size 2
 
 Continue a previous run through epoch 20 with::
 
-    python -m mstat_project.ml.baseline \
+    python -m mstat_project.ml.baseline --legacy \
         --resume-from data/artifacts/model_checkpoints/baseline/<run-id>/epoch_010.pt \
         --epochs 20
 
 Start a separate run at epoch 1 using another run's model weights with::
 
-    python -m mstat_project.ml.baseline \
+    python -m mstat_project.ml.baseline --legacy \
         --initial-weights-from data/artifacts/model_checkpoints/baseline/<run-id>/epoch_010.pt \
         --learning-rate 0.0001 \
         --epochs 10
@@ -1467,7 +1473,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Sequence[str] | None = None) -> str:
+def legacy_main(argv: Sequence[str] | None = None) -> str:
     """Run legacy baseline training from command-line arguments.
 
     Args:
@@ -1495,6 +1501,19 @@ def main(argv: Sequence[str] | None = None) -> str:
         spatial_size=tuple(args.spatial_size),
     )
     return run_training(config)
+
+
+def main(argv: Sequence[str] | None = None):
+    """Run continuous A/B baselines, or the historical CLI with --legacy."""
+    import sys
+
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if "--legacy" in arguments:
+        arguments.remove("--legacy")
+        return legacy_main(arguments)
+    from mstat_project.ml.survival import main as continuous_main
+
+    return continuous_main(arguments, default_variants=("a", "b"))
 
 
 if __name__ == "__main__":

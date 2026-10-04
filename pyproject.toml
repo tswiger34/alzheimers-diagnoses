@@ -1,7 +1,7 @@
 [project]
 name = "mstat-project"
 version = "0.1.0"
-description = "Fixed-landmark comparison of LTSA and Cox MRI survival models"
+description = "Continuous-survival comparison of latest-MRI and longitudinal MRI prognosis"
 readme = "README.md"
 requires-python = ">=3.12"
 

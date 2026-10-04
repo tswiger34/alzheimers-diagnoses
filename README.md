@@ -1,109 +1,181 @@
 # LTSA MSTAT Project
 
-This project compares a longitudinal transformer survival model (LTSA) with a matched single-MRI Cox baseline for Alzheimer's disease prognosis.
+**Scientific question: Does longitudinal MRI history improve AD prognosis beyond
+the information contained in the most recent MRI?**
 
-## Fixed-landmark comparison
+The current pipeline trains dynamic continuous-survival models using the binned
+MRI inputs from `core_image_set`, the canonical schedule in
+`core_follow_up_buckets`, and clinical outcomes in `core_survival_landmarks`.
 
-The comparison uses the existing patient-level train, validation, and test split. For each landmark `L` (0, 12, 24, and 36 months by default):
+| Component | Baseline A (`a`) | Baseline B (`b`) | MRI history (`history`) |
+|---|---|---|---|
+| MRI information | Latest available image | Latest available image | Available image prefix, including latest |
+| Explicit acquisition time | No | Actual months since baseline | Actual months for each image |
+| Temporal transformer | No | No | Yes, missing slots masked |
+| Image encoder | Same ResNet-101 center-slice encoder | Same | Same |
+| Survival head/objective | Continuous neural hazard / conditional NLL | Same | Same |
+| Optimization | AdamW, validation-driven scheduler | Same | Same |
+| Augmentation / step-ahead loss | Disabled | Disabled | Disabled |
 
-- A patient is eligible only when their event or censoring time is strictly greater than `L`.
-- Only valid MRIs acquired on or before `L` are included.
-- The Cox baseline receives the latest eligible MRI.
-- LTSA receives the complete chronological MRI prefix.
-- Follow-up is modeled from the landmark: `outcome time - L`.
+The encoder, image projection, and survival head have identical initial weights
+for the same seed. Each arm is then trained separately. The existing patient
+splits, preprocessing, sampled training landmarks, validation weighting,
+checkpoint selection, and evaluation patients are shared within a comparison run.
 
-Before either model starts, every configured landmark is checked for tensor availability, non-empty splits, observed events, and comparable survival pairs. Both models then use the same frozen cohort records.
+## Prediction setting
 
-The shared MRI encoder converts each volume to axial, coronal, and sagittal center slices and applies identical ResNet-101/ImageNet preprocessing. BatchNorm running statistics remain frozen during fine-tuning.
+At prediction month `t`, require `T > t`, then select images whose **actual**
+acquisition time `s <= t`. A missing bin stays missing: at month 60, a patient with
+images at 0, 6, 12, 24 and 132 months contributes the month-24 image to each baseline
+and the prefix through month 24 to the history model. An image at 60.2 months is
+not available at month 60, even when it occupies the nominal month-60 bin.
 
-## Training
+The clinical endpoint `T` is the first AD examination date, or the last examination
+with a valid diagnosis if no AD is observed, relative to baseline MRI. Months use
+`days * 12 / 365` without binning or rounding the outcome. Training MRI rows must
+satisfy `s < T`; same-day and post-outcome images are excluded. The new clinical
+table retains exclusion reasons for auditing. It does not overwrite the older
+image-derived outcomes in `core_image_set` or in tensor packages.
 
-### Cohort preparation and exploration
+One eligible MRI landmark per training patient is sampled each epoch. Validation
+uses all eligible MRI landmarks with weight `1 / n_i`, giving each patient equal
+total influence. Each variant trains one model across follow-up, rather than a
+separate model per nominal visit. At an acquisition landmark the likelihood is
+`integral_s^T lambda(u|z) du - event * log(lambda(T|z))`. At a later prediction
+landmark, survival is conditioned through `t`, integrating from `t`, not from the
+older MRI date. See the [protocol and run guide](docs/continuous_survival.md).
 
-Run these notebooks in order using the project Python environment:
+## Cohort preparation and exploration
+
+The existing notebooks remain the split/cohort exploration entry points:
 
 1. [`notebooks/data_splitting.ipynb`](notebooks/data_splitting.ipynb) validates the
-   baseline-relative bins from `_core.core_image_set` and `_core.core_follow_up_buckets`,
-   keeps patients with tensor files, and assigns whole patients to 70% train / 15%
-   validation / 15% test groups. It balances retained-image counts within baseline
-   diagnosis and censoring strata with seed 42. `WRITE_SPLITS=True` updates
-   `_raw.train_test_split`; set it to `False` for a preview.
-2. [`notebooks/data_viz.ipynb`](notebooks/data_viz.ipynb) reads those saved assignments,
-   verifies source hashes, and renders cohort summaries, scheduled-bin coverage,
-   actual timing offsets, diagnoses, demographics, MRI metadata, and Table 1.
-   It does not write split assignments. Historical experiment diagnostics are optional
-   and explicitly separate from the refreshed cohort.
+   binned image cohort, checks tensor-file presence, and saves patient assignments
+   to `_raw.train_test_split`. It archives cohort and assignment snapshots under
+   `data/artifacts/data_splits/`. `WRITE_SPLITS=False` previews without writing.
+2. [`notebooks/data_viz.ipynb`](notebooks/data_viz.ipynb) verifies that snapshot and
+   displays image-bin coverage and cohort summaries. Its historical experiment
+   section describes the legacy runs.
 
-The split notebook archives prior assignments, selected cohort rows, the schedule,
-and provenance under `data/artifacts/data_splits/`; keep these local artifacts to
-reproduce or restore an assignment. The visualization notebook requires its
-`latest.json` manifest. After a source change, rerun splitting before visualization.
-Tensor-file eligibility checks existence only; selected image IDs and tensor contents
-must still agree before training. Visit codes represent scheduled bins, while actual
-acquisition times continue to determine prediction-time eligibility.
+The continuous training pipeline reads the existing assignments and never changes
+them. Its clinical exclusions produce a smaller prognosis cohort with different
+event counts from the image-cohort notebook. Use each run's `manifest.json` and
+`training_landmarks.csv` for the actual training cohort. Do not regenerate splits
+between model arms. Tensor labels from prior preprocessing are ignored; every
+selected MRI is located by image ID and checked before training.
 
-To execute and save both notebooks from the repository root:
+## Run from a PowerShell terminal
 
-```powershell
-uv run jupyter nbconvert --execute --to notebook --inplace notebooks/data_splitting.ipynb
-uv run jupyter nbconvert --execute --to notebook --inplace notebooks/data_viz.ipynb
-```
+These commands use the existing project environment and load database/image paths
+from `.env`. Ensure Postgres is available. The clinical dbt model must already be
+built; [the run guide](docs/continuous_survival.md#prepare-the-database) includes
+the rebuild command if needed.
 
-### Model commands
-
-Install the workspace and verify the command-line entry points:
+First validate cohort and tensor availability without starting a model:
 
 ```powershell
-uv sync
-uv run python -m mstat_project.ml.ltsa --help
-uv run python -m mstat_project.ml.compare --help
+.venv\Scripts\python.exe -m mstat_project.ml.baseline --preflight-only
 ```
 
-Train one LTSA landmark:
+Run the requested two-epoch checks for both pretrained single-image baselines:
 
 ```powershell
-uv run python -m mstat_project.ml.ltsa --landmark-months 12
+Remove-Item Env:CUDA_VISIBLE_DEVICES -ErrorAction SilentlyContinue
+$env:OMP_NUM_THREADS = '2'
+$env:MKL_NUM_THREADS = '2'
+$env:POLARS_MAX_THREADS = '2'
+.venv\Scripts\python.exe -u -X faulthandler -m mstat_project.ml.baseline --epochs 2 --patience 2 --device cuda --cpu-threads 2 --bootstrap-samples 0
 ```
 
-Train matched baseline/LTSA pairs at all default landmarks and compute a 1,000-sample paired patient-bootstrap confidence interval:
+Removing `CUDA_VISIBLE_DEVICES=-1` is necessary if the earlier CPU-only test
+commands were run in this same terminal. `--device cpu` is supported as an
+alternative. `--bootstrap-samples 0` skips confidence intervals for this short
+pipeline check. Two epochs are not a final scientific experiment.
+
+For a full matched comparison, run all three arms in one invocation:
 
 ```powershell
-uv run python -m mstat_project.ml.compare
+.venv\Scripts\python.exe -u -m mstat_project.ml.compare --variants a b history
 ```
 
-Useful smoke-test options are `--epochs 1 --patience 1 --no-pretrained`. Real training defaults to AdamW with learning rate `1e-4`, weight decay `1e-4`, gradient clipping at `5.0`, batch size 2, 50 epochs, patience 10, and seed 42.
+`baseline` defaults to A/B, `ltsa` defaults to history, and `compare` defaults to all
+three. `mstat_project.ml.survival` is the common implementation and also defaults to
+A/B. All support `--help`. The defaults are 50 epochs, patience 10, batch size 2,
+learning rate `1e-4`, weight decay `1e-4`, gradient clipping 5, seed 42, and no data
+loader worker processes. The shared ReduceLROnPlateau scheduler halves the learning
+rate after its patience of 3; checkpoints minimize patient-averaged validation
+NLL. Change the batch size for all arms together if GPU memory requires it.
 
-LTSA uses six-month discrete hazards, censoring NLL with `beta=0.15`, and next-visit feature MSE weighted by `1.0`. Its final time bin is reserved for durations beyond the maximum training support. Checkpoints are selected by validation C-index, with validation loss as the tie-breaker. LTSA risk is negative restricted mean survival time; the baseline uses the exact full-risk-set Cox partial likelihood.
+## Results and comparison
 
-The legacy baseline can either continue a checkpoint with `--resume-from` or start an independent run
-at epoch 1 with `--initial-weights-from`. The independent mode loads only model parameters, so it uses
-the new run's configuration and a fresh optimizer. These modes are mutually exclusive.
+Each invocation creates a unique directory under
+`data/artifacts/model_checkpoints/continuous/<run-id>/` and prints its path.
 
-## Results
+- `manifest.json`: configuration, cohort/exclusion counts, source/split/schedule
+  hashes, code hashes and tensor preflight results.
+- `source.parquet`, `schedule.csv`, `patient_splits.csv`, `training_landmarks.csv`:
+  frozen inputs and the exact eligible MRI-landmark table.
+- `a/`, `b/`, `history/`: selected `best.pt`, most recent `last.pt`, epoch metrics,
+  sampled MRI IDs per epoch, summaries and patient predictions.
+- `results.json`: metrics for each arm; `comparisons.json`: paired C-index
+  differences and, when enabled, 95% patient-bootstrap intervals.
+- `status.json`, `training.log`: progress/failure state and training log. GPU runs
+  report PyTorch allocated/reserved/peak memory every 100 training batches.
 
-Checkpoints are written below `data/artifacts/model_checkpoints`. New comparison runs populate:
+Run status, configuration, summaries and comparisons are also stored in
+`_ml.continuous_survival_runs`. Detailed patient predictions and epochs are local
+artifacts. Keep the run directory with the database entry.
 
-- `_ml.survival_runs`: configuration, cohort/event counts, checkpoint selection, test C-index, and paired confidence intervals.
-- `_ml.survival_epoch_metrics`: total, survival, and auxiliary losses; C-indices; learning rate; and checkpoint path.
-- `_ml.survival_run_patients`: exact split, outcome, selected MRI, and chronological image history.
-- `_ml.survival_test_predictions`: scalar risk, outcome, image history, and LTSA survival curve.
+Evaluation uses all canonical schedule targets. At each target it reports
+conditional survival at 12, 24 and 60 future months, NLL, and Harrell C-index with
+outcomes truncated at the corresponding horizon. Missing comparable pairs yield
+`null`, not zero. Comparisons verify identical patients, outcomes and available
+image histories, then resample patients jointly **within each landmark**. They
+report B-minus-A, history-minus-A, and history-minus-B as available. Pointwise
+intervals do not adjust for testing many landmarks/horizons. This is a ranking
+evaluation, not a calibration or IPCW analysis.
 
-The original `mstat_project.ml.baseline` command and `_ml.baseline_*` tables remain available as legacy history.
-`_ml.baseline_runs` records the initial-weight kind, source run ID, and checkpoint path for new and resumed
-legacy runs.
+The history-minus-B comparison most directly addresses added imaging history
+beyond explicit acquisition time. Historical Cox/discrete scores do not form a
+matched comparison with these continuous models. Select the primary landmark and
+horizon before interpreting held-out test results.
+
+## Legacy experiments
+
+Historical Python APIs, checkpoints and `_ml.baseline_*` / `_ml.survival_*` tables
+remain available. Their CLI now requires explicit `--legacy`, including legacy
+checkpoint resume or initial-weight options:
+
+```powershell
+.venv\Scripts\python.exe -m mstat_project.ml.baseline --legacy --help
+.venv\Scripts\python.exe -m mstat_project.ml.ltsa --legacy --help
+.venv\Scripts\python.exe -m mstat_project.ml.compare --legacy --help
+```
+
+The continuous command creates a new run each time. Its `last.pt` preserves model,
+optimizer and scheduler state for inspection, but automatic crash resume is not
+implemented. It does not load legacy checkpoints.
 
 ## Verification
 
-Run the focused ML/package checks with:
+Run these yourself from the repository root. The new tests use synthetic tensors
+and do not require Postgres or pretrained model downloads:
 
 ```powershell
-uv run pytest tests/ltsa tests/mstat_project/test_baseline.py tests/mstat_project/test_landmarks.py tests/mstat_project/test_ltsa_training.py tests/mstat_project/test_comparison_e2e.py -q
-uv run ruff check packages/ltsa/src src/mstat_project/ml
-uv run ty check
+$env:OMP_NUM_THREADS = '2'
+$env:MKL_NUM_THREADS = '2'
+$env:POLARS_MAX_THREADS = '2'
+$env:CUDA_VISIBLE_DEVICES = '-1'
+.venv\Scripts\python.exe -X faulthandler -m pytest tests/mstat_project/test_continuous_survival.py tests/mstat_project/test_survival_comparison.py -x -v
 ```
 
-The LTSA architecture follows [Harnessing the Power of Longitudinal Medical Imaging for Eye Disease Prognosis Using Transformer-based Sequence Modeling](https://pmc.ncbi.nlm.nih.gov/articles/PMC11329720/) and the [authors' implementation](https://github.com/bionlplab/longitudinal_transformer_for_survival_analysis).
+The regression command, optional lint command, expected artifacts, and manual
+monitoring commands are in the [run guide](docs/continuous_survival.md).
 
-## Known unrelated test drift
+Repository-wide tests have known legacy failures outside this pipeline, including
+`test_diagnoses_csv.py` importing removed APIs and older NIfTI helper tests.
 
-The repository-wide suite still contains tests outside this comparison scope that target removed or renamed APIs. `test_diagnoses_csv.py` imports the absent `mstat_project.data_models` package, and six `test_to_nifti.py` cases reference older NIfTI helper names. These failures are separate from the focused ML/LTSA suite above.
+The history approach is inspired by [the LTSA paper](https://pmc.ncbi.nlm.nih.gov/articles/PMC11329720/)
+and [authors' implementation](https://github.com/bionlplab/longitudinal_transformer_for_survival_analysis).
+The current continuous hazard and MRI cohort are adaptations, not a reproduction
+of the paper's discrete objective.

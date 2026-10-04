@@ -101,7 +101,8 @@ class LTSA(torch.nn.Module):
         self.classifier = torch.nn.Sequential(
             torch.nn.Dropout(p=dropout),
             torch.nn.Linear(img_encoder.n_features, n_time_bins),
-            torch.nn.Softplus(),
+            # Discrete hazards are conditional per-bin probabilities, not rates.
+            torch.nn.Sigmoid(),
         )
         self.step_ahead_predictor = torch.nn.Sequential(
             torch.nn.Dropout(p=dropout),

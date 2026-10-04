@@ -1,4 +1,8 @@
-"""Run paired fixed-landmark baseline and LTSA experiments.
+"""Run a shared continuous-survival comparison of A, B and MRI history.
+
+The CLI uses the binned MRI cohort and clinical outcomes. ``--legacy`` selects
+the historical Cox/discrete comparison described below; its Python APIs are
+retained only for reproducing those experiments.
 
 The module preflights every configured landmark before training, runs a
 single-MRI Cox baseline and LTSA on identical frozen patient cohorts, verifies
@@ -389,7 +393,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Sequence[str] | None = None) -> list[LandmarkComparisonResult]:
+def legacy_main(argv: Sequence[str] | None = None) -> list[LandmarkComparisonResult]:
     """Run the paired benchmark from command-line arguments.
 
     Args:
@@ -427,6 +431,19 @@ def main(argv: Sequence[str] | None = None) -> list[LandmarkComparisonResult]:
             spatial_size=tuple(args.spatial_size),
         )
     )
+
+
+def main(argv: Sequence[str] | None = None):
+    """Run matched continuous variants, or the historical CLI with --legacy."""
+    import sys
+
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if "--legacy" in arguments:
+        arguments.remove("--legacy")
+        return legacy_main(arguments)
+    from mstat_project.ml.survival import main as continuous_main
+
+    return continuous_main(arguments, default_variants=("a", "b", "history"))
 
 
 if __name__ == "__main__":

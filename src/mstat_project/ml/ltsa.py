@@ -1,4 +1,8 @@
-"""Train and evaluate LTSA on a fixed-landmark longitudinal MRI cohort.
+"""Train continuous-survival MRI history using the shared baseline pipeline.
+
+The CLI defaults to the continuous model. ``--legacy`` selects the historical
+fixed-landmark discrete LTSA implementation described below. The historical
+Python APIs remain available for reproducing old experiments.
 
 The module builds split-specific sequence loaders, optimizes discrete survival
 and next-visit feature objectives, selects checkpoints using validation
@@ -7,7 +11,7 @@ complete run through the unified survival result store.
 
 Continue a previous run through epoch 75 with::
 
-    python -m mstat_project.ml.ltsa \
+    python -m mstat_project.ml.ltsa --legacy \
         --resume-from data/artifacts/model_checkpoints/ltsa/<run-id>/epoch_050.pt \
         --epochs 75
 """
@@ -962,7 +966,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Sequence[str] | None = None) -> str:
+def legacy_main(argv: Sequence[str] | None = None) -> str:
     """Run LTSA training from command-line arguments.
 
     Args:
@@ -1002,6 +1006,19 @@ def main(argv: Sequence[str] | None = None) -> str:
     )
     LOGGER.info("Completed LTSA run %s with test C-index %.4f", result.run_id, result.test_c_index)
     return result.run_id
+
+
+def main(argv: Sequence[str] | None = None):
+    """Run continuous MRI history, or the historical discrete CLI with --legacy."""
+    import sys
+
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if "--legacy" in arguments:
+        arguments.remove("--legacy")
+        return legacy_main(arguments)
+    from mstat_project.ml.survival import main as continuous_main
+
+    return continuous_main(arguments, default_variants=("history",))
 
 
 if __name__ == "__main__":

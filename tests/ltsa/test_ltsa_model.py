@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from ltsa.ltsa_model import LTSA
+from ltsa.losses import nll_loss
 
 
 class DummyImageEncoder(torch.nn.Module):
@@ -43,6 +44,34 @@ def test_ltsa_forward_masks_padding_and_backpropagates() -> None:
     (outputs.hazards.sum() + outputs.feat_preds.sum()).backward()
     assert images.grad is not None
     assert torch.isfinite(images.grad).all()
+
+
+def test_discrete_hazards_remain_probabilities_for_positive_logits() -> None:
+    model = _model().eval()
+    # Force logits that would make an unbounded rate activation exceed one.
+    with torch.no_grad():
+        model.classifier[1].weight.zero_()
+        model.classifier[1].bias.copy_(torch.tensor([-2.0, 0.0, 2.0, 4.0]))
+    outputs = model(
+        torch.zeros(2, 1, 1, 8, 8),
+        sequence_lengths=[1, 1],
+        relative_times=torch.zeros(2, 1),
+    )
+
+    assert torch.isfinite(outputs.hazards).all()
+    assert ((outputs.hazards >= 0) & (outputs.hazards <= 1)).all()
+    assert ((outputs.surv >= 0) & (outputs.surv <= 1)).all()
+    assert (outputs.surv[..., 1:] <= outputs.surv[..., :-1]).all()
+    loss = nll_loss(
+        outputs.hazards[:, 0],
+        outputs.surv[:, 0],
+        torch.tensor([1, 2]),
+        torch.tensor([0.0, 1.0]),
+    )
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert model.classifier[1].bias.grad is not None
+    assert torch.isfinite(model.classifier[1].bias.grad).all()
 
 
 def test_causal_attention_prevents_future_image_leakage() -> None:
