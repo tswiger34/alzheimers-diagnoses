@@ -1,4 +1,8 @@
-# Continuous MRI survival: protocol and run guide
+# Historical continuous MRI survival: version 1 protocol and run guide
+
+This document describes the reference Tanh experiments. Its training commands and
+defaults are historical. For the current stabilized implementation, test commands,
+gates, cache workflow, and explicit held-out reporting, use [the version 2 guide](ltsa_v2.md).
 
 The controlled question is whether prior MRI images improve AD prognosis beyond
 the latest available MRI. Run A and B first to check the pipeline; use a shared

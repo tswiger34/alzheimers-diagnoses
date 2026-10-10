@@ -2,7 +2,7 @@ import copy
 
 import pytest
 
-from mstat_project.ml.survival_comparison import compare_predictions
+from mstat_project.ml.survival_comparison import compare_predictions, compare_experiments
 
 
 def predictions():
@@ -80,3 +80,47 @@ def test_legacy_commands_require_explicit_opt_in(monkeypatch, module_name):
     module = importlib.import_module(f"mstat_project.ml.{module_name}")
     monkeypatch.setattr(module, "legacy_main", lambda argv: argv)
     assert module.main(["--legacy", "--epochs", "2"]) == ["--epochs", "2"]
+
+
+def test_named_comparisons_stratify_history_and_suppress_sparse_intervals():
+    data = predictions()
+    named = {"b": data["b"], "history-1l": data["history"]}
+    results = compare_experiments(named, (12.,), bootstrap_samples=100)
+    assert {r["mri_count_stratum"] for r in results} == {"all", "2"}
+    assert all(r["status"] == "descriptive_sparse" for r in results)
+    assert all(r["bootstrap_samples_used"] == 0 and r["confidence_interval_low"] is None for r in results)
+    bad = copy.deepcopy(named)
+    bad["history-1l"][0]["available_history_ids"] = ["other"]
+    with pytest.raises(ValueError, match="mismatch"):
+        compare_experiments(bad, (12.,))
+
+
+def test_individual_and_paired_intervals_are_reproducible_with_whole_patients():
+    rows = [{"ptid": f"p{i:02d}", "split": "test", "landmark_months": 24.,
+             "outcome_months": 25.+i, "event": i < 30, "acquisition_months": 20.,
+             "available_history_ids": [f"{i}-0", f"{i}-20"], "visit_nums": [0, 3],
+             "nll": 1., "survival": [.5]} for i in range(40)]
+    history = copy.deepcopy(rows)
+    for i, row in enumerate(history):
+        row["survival"] = [.05 + i/50]
+        row["nll"] = .8
+    data = {"b": rows, "history-1l": history}
+    results = compare_experiments(data, (60.,), bootstrap_samples=40, seed=7)
+    primary = next(r for r in results if r["primary"])
+    assert primary["reference_c_index"] == .5
+    assert primary["candidate_c_index"] == 1.
+    assert primary["difference"] == .5
+    assert primary["reference_confidence_interval"] == [.5, .5]
+    assert primary["candidate_confidence_interval"] == [1., 1.]
+    assert primary["bootstrap_samples_used"] == 40
+    assert primary["reference_mean_nll"] == 1.
+    assert primary["candidate_mean_nll"] == pytest.approx(.8)
+    assert results == compare_experiments(data, (60.,), bootstrap_samples=40, seed=7)
+    repeated = copy.deepcopy(data)
+    for name in repeated:
+        second = copy.deepcopy(repeated[name])
+        for row in second:
+            row["landmark_months"] = 0.
+        repeated[name].extend(second)
+    expanded = compare_experiments(repeated, (60.,), bootstrap_samples=40, seed=7)
+    assert next(r for r in expanded if r["primary"]) == primary

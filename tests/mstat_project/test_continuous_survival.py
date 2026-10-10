@@ -157,9 +157,10 @@ def test_two_epoch_pipeline_selects_and_saves_predictions(tmp_path,variant):
     config = SurvivalConfig(epochs=2,patience=2,device="cpu",pretrained=False,spatial_size=(16,16,16))
     result = train_variant(config,records,schedule,variant,tmp_path/variant,encoder_factory=TinyEncoder)
     assert result["best_epoch"] in (1,2)
-    assert result["test_by_landmark"]["60.0"]["patients"] == 2
+    assert result["validation_by_landmark"]["60.0"]["patients"] == 2
     assert (tmp_path/variant/"best.pt").is_file()
-    assert (tmp_path/variant/"test_predictions.json").is_file()
+    assert (tmp_path/variant/"validation_predictions.json").is_file()
+    assert not (tmp_path/variant/"test_predictions.json").exists()
 
 
 def test_no_comparable_pairs_report_null_not_zero():
@@ -171,7 +172,7 @@ def test_full_run_saves_matched_samples_and_comparison(tmp_path, monkeypatch):
     import json
     import mstat_project.ml.survival as pipeline
 
-    _, frame, schedule, splits = fixture_data(tmp_path)
+    records, frame, schedule, splits = fixture_data(tmp_path)
     monkeypatch.setattr(pipeline, "load_source", lambda engine: (frame, schedule, splits))
     stored = []
     monkeypatch.setattr(pipeline, "_persist_run", lambda engine, run_id, output, status, payload: stored.append(status))
@@ -185,6 +186,7 @@ def test_full_run_saves_matched_samples_and_comparison(tmp_path, monkeypatch):
         epochs=2, patience=2, device="cpu", pretrained=False, spatial_size=(16, 16, 16),
         tensor_dir=tmp_path, output_dir=tmp_path / "runs", bootstrap_samples=0,
     )
+    config = synthetic_gate(config, records, frame, schedule, splits, tmp_path)
     output = pipeline.run(config, engine=object())
     assert stored == ["running", "running", "running", "completed"]
     assert json.loads((output / "status.json").read_text())["status"] == "completed"
@@ -251,10 +253,14 @@ def test_diagnostic_trace_matches_forward_and_preserves_state(tmp_path, variant)
     assert all(torch.equal(v, state[k]) for k, v in model.state_dict().items())
     assert all(p.grad is None for p in model.parameters())
     assert all(not m._forward_hooks and not m._forward_pre_hooks for m in model.modules())
-    assert list(report["panel_variation"]) == [
+    expected_stages = [
         "loaded_volume", "preprocessed_volume", "normalized_input", "encoder_features",
-        "projected_features", "head_embedding", "pre_tanh", "tanh", "hazard", "survival",
+        "projected_features", "head_embedding",
     ]
+    if variant == "history":
+        expected_stages.append("temporal_features")
+    expected_stages.extend(["hidden_preactivation", "hidden_activation", "hazard", "cumulative_hazard", "survival", "risk"])
+    assert list(report["panel_variation"]) == expected_stages
     model.eval()
     dataset = SurvivalDataset(panel, history=variant == "history", n_slots=7, spatial_size=(16,16,16))
     with torch.no_grad():
@@ -274,11 +280,13 @@ def test_diagnostics_identifies_saturated_constant_head_and_cleans_up_on_error(t
     records, *_ = fixture_data(tmp_path)
     panel = select_diagnostic_panel(records, 42)
     model = ContinuousMRIModel(DiagnosticEncoder())
+    # Retain coverage for custom heads that still use Tanh; production uses GELU.
+    model.head.network[1] = nn.Tanh()
     with torch.no_grad():
         model.head.network[0].weight.zero_()
         model.head.network[0].bias.fill_(100.)
     report = trace_diagnostic_panel(model, panel, spatial_size=(16,16,16), device="cpu", horizons=(12.,60.))
-    assert report["first_near_constant_stage"] == "pre_tanh"
+    assert report["first_near_constant_stage"] == "hidden_preactivation"
     assert all(r["stages"]["tanh"]["mean_local_derivative"] == 0 for r in report["patients"])
     assert all(r["hazard_near_constant_across_times"] for r in report["patients"])
     assert any("saturated" in w for w in report["warnings"])
@@ -383,8 +391,36 @@ def test_frozen_encoder_pipeline_and_cli(tmp_path, monkeypatch):
         p["stages"]["encoder_features"] for p in after["patients"]]
     checkpoint = torch.load(output / "last.pt", map_location="cpu", weights_only=False)
     assert checkpoint["config"]["freeze_encoder"] is True
-    # A's optimizer contains projection, time embedding, and hazard head only.
-    assert len(checkpoint["optimizer"]["param_groups"][0]["params"]) == 8
+    # A excludes its unused time embedding and frozen encoder, and includes both normalizations.
+    assert len(checkpoint["optimizer"]["param_groups"][0]["params"]) == 10
     monkeypatch.setattr(pipeline, "run", lambda config, **kwargs: config)
     assert pipeline.main(["--freeze-encoder"]).freeze_encoder is True
-    assert pipeline.main([]).freeze_encoder is False
+    assert pipeline.main([]).freeze_encoder is True
+    assert pipeline.main(["--no-freeze-encoder"]).freeze_encoder is False
+
+
+def synthetic_gate(config, records, frame, schedule, splits, tmp_path):
+    """Supply deterministic passing evidence for orchestration tests, not research runs."""
+    import copy
+    from mstat_project.data_prep.data_splitting import frame_fingerprint
+    from mstat_project.ml.survival import _seed, model_identity, write_json
+    from mstat_project.ml.survival_embeddings import fingerprint
+    from mstat_project.ml.survival_protocol import PROTOCOL_PATH, read_json, implementation_hashes, cohort_fingerprint
+
+    protocol = read_json(PROTOCOL_PATH)
+    protocol["snapshot_hashes"] = {"source": frame_fingerprint(frame), "schedule": frame_fingerprint(schedule),
+                                   "splits": frame_fingerprint(splits)}
+    protocol_path = tmp_path / "protocol.json"
+    gate_path = tmp_path / "gate.json"
+    write_json(protocol_path, protocol)
+    _seed(config.seed)
+    model = ContinuousMRIModel(TinyEncoder(), freeze_encoder=True)
+    identity = model_identity(model, records, config)
+    result = {"passed": True, "initial": {"nll": 2.0},
+              "final": {"nll": 1.0, "c_index": 1.0, "risk_variance": .1},
+              "initialization_check": {"passed": True, "max_survival_difference": .001}}
+    write_json(gate_path, {"passed": True, "protocol_sha256": fingerprint(protocol),
+        "snapshot_hashes": protocol["snapshot_hashes"], "encoder_sha256": identity["encoder_sha256"],
+        "implementation_hashes": implementation_hashes(), "full_cohort_sha256": cohort_fingerprint(records),
+        "arms": {arm: copy.deepcopy(result) for arm in ("a", "b", "history")}})
+    return replace(config, debug_gate=gate_path, protocol_path=protocol_path)

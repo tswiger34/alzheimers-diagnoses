@@ -1,5 +1,16 @@
 # LTSA MSTAT Project
 
+**Current implementation: stabilized LTSA v2.** Start with the
+[v2 test and experiment guide](docs/ltsa_v2.md) and
+[locked protocol](docs/ltsa_protocol.json). Training is now frozen-encoder and
+validation-only by default. Full experiments require a passed tiny-subset gate;
+history training also requires promoted A/B checkpoints. Held-out evaluation is
+a separate reporting stage. The code changes are awaiting user-run tests.
+
+The remainder of this README describes the **historical reference pipeline**.
+Its commands and defaults have been superseded by the v2 guide; do not use them
+to start new research experiments.
+
 **Scientific question: Does longitudinal MRI history improve AD prognosis beyond
 the information contained in the most recent MRI?**
 

@@ -1,0 +1,91 @@
+{
+  "protocol_version": 2,
+  "reference_run": "611be867-cfda-40a2-8dc2-04fa5b2e5046",
+  "reference_directory": "data\\artifacts\\model_checkpoints\\continuous\\611be867-cfda-40a2-8dc2-04fa5b2e5046",
+  "snapshot_hashes": {
+    "source": "75a8ccf0ef1c6281a094a6bc4fb8c15b2023d35cb1c8c113615f68475a5775d6",
+    "schedule": "f555e5ce483bf1eaccd14e9a7c298389ea90030c8a6206f9dfdb07844d5ae012",
+    "splits": "9b63513a5342300ad15da807b2ca3e04516e4e05b4859115993c78bc7a2529ff"
+  },
+  "reference_config": {
+    "variants": [
+      "a",
+      "b"
+    ],
+    "epochs": 30,
+    "patience": 4,
+    "batch_size": 6,
+    "learning_rate": 0.0001,
+    "weight_decay": 0.0001,
+    "gradient_clip_norm": 5.0,
+    "seed": 42,
+    "num_workers": 0,
+    "device": "cuda",
+    "pretrained": true,
+    "spatial_size": [
+      96,
+      112,
+      96
+    ],
+    "quadrature_points": 32,
+    "bootstrap_samples": 0,
+    "cpu_threads": 2,
+    "diagnostics": false,
+    "freeze_encoder": true,
+    "horizons": [
+      12,
+      24,
+      60
+    ],
+    "tensor_dir": "F:\\data\\alzheimers-mris\\tensors",
+    "output_dir": "data\\artifacts\\model_checkpoints\\continuous"
+  },
+  "primary": {
+    "reference": "b",
+    "candidate": "history-1l",
+    "landmark_months": 24.0,
+    "horizon_months": 60.0
+  },
+  "reference_baselines": {
+    "a": {
+      "best_epoch": 11,
+      "validation_nll": 1.0590972830349734,
+      "checkpoint": "data\\artifacts\\model_checkpoints\\continuous\\611be867-cfda-40a2-8dc2-04fa5b2e5046\\a\\best.pt",
+      "checkpoint_sha256": "9d7982f72fd429084b356bcdb6cf0ca909b1723d207b7bdb91d7d73a7f99d747"
+    },
+    "b": {
+      "best_epoch": 13,
+      "validation_nll": 1.0589065400769206,
+      "checkpoint": "data\\artifacts\\model_checkpoints\\continuous\\611be867-cfda-40a2-8dc2-04fa5b2e5046\\b\\best.pt",
+      "checkpoint_sha256": "11e17b3273697bd8270c9703aedadfd01b94112529f5ef2f6f343da9cdf6944a"
+    }
+  },
+  "baseline_nll_tolerance": 1e-06,
+  "minimum_patients": 30,
+  "minimum_events": 5,
+  "bootstrap_samples": 1000,
+  "bootstrap_seed": 42,
+  "history_strata": [
+    "1",
+    "2",
+    "3+"
+  ],
+  "time_transform": "t/(t+180)",
+  "selection": "patient_mean_validation_nll",
+  "debug": {
+    "patients": 16,
+    "events": 8,
+    "censored": 8,
+    "max_updates": 2000,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0,
+    "dropout": 0.0,
+    "minimum_nll_drop": 0.5,
+    "minimum_c_index": 0.95
+  },
+  "optional_seeds": [
+    42,
+    43,
+    44
+  ]
+}
