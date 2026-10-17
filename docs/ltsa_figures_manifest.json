@@ -1,0 +1,100 @@
+{
+  "format_version": 1,
+  "root": "..",
+  "protocol": "docs/ltsa_protocol.json",
+  "cache": "data/artifacts/ltsa_v2/embeddings.pt",
+  "primary": {"landmark_months": 24, "horizon_months": 60},
+  "bootstrap_samples": 1000,
+  "bootstrap_seed": 42,
+  "cohort_audit": "data/artifacts/ltsa_v2/audit.json",
+  "architecture_report": "data/artifacts/ltsa_v2/investigations/architecture_seed_42_replay/report.json",
+  "experiments": [
+    {
+      "role": "a", "seed": 42,
+      "checkpoint": "data/artifacts/ltsa_v2/seed_42/a/best.pt",
+      "checkpoint_sha256": "e56665591edee279cf3d23cbb8294bcc5e09c0d6d98e98b43250281ec87c655d",
+      "summary": "data/artifacts/ltsa_v2/seed_42/a/summary.json",
+      "summary_sha256": "8738d8ea5fb788b9b0ea9cb0b968ac8c139efea547f3cea58631b9fe287a9772",
+      "predictions": {"validation": "data/artifacts/ltsa_v2/seed_42/a/validation_predictions.json"},
+      "prediction_sha256": {"validation": "e4e763b3e6e6e6e8203607fb49b30f007835f88949ecbb5c5c379bdff902a1da"}
+    },
+    {
+      "role": "historical-b", "seed": 42,
+      "checkpoint": "data/artifacts/model_checkpoints/continuous/611be867-cfda-40a2-8dc2-04fa5b2e5046/b/best.pt",
+      "checkpoint_sha256": "11e17b3273697bd8270c9703aedadfd01b94112529f5ef2f6f343da9cdf6944a",
+      "summary": "data/artifacts/model_checkpoints/continuous/611be867-cfda-40a2-8dc2-04fa5b2e5046/b/summary.json",
+      "summary_sha256": "868c9d08ce558bf8d68679275f6af8b049271423e64ef65698ca2775ddc6b334",
+      "predictions": {"validation": "data/artifacts/ltsa_v2/investigations/exploratory_history_1l_seed_42/legacy_b_validation_predictions.json"},
+      "prediction_sha256": {"validation": "b003e2176ca7dbf313c011c07c2bc748371c6297cfd8121beab969df1ee59812"},
+      "reference_replay": "data/artifacts/ltsa_v2/investigations/architecture_seed_42/reference_replay_20261010T001531716004Z/report.json"
+    },
+    {
+      "role": "b", "seed": 42,
+      "checkpoint": "data/artifacts/ltsa_v2/seed_42/b/best.pt",
+      "checkpoint_sha256": "29e0a43583de6759694a004525aed717634df94baf03057e87c6aaca13d6e201",
+      "summary": "data/artifacts/ltsa_v2/seed_42/b/summary.json",
+      "summary_sha256": "7eaa7d05e534478ba87e2e5c09617250e76305b09fd1ad8ac11cac2f5e8f73c5",
+      "predictions": {"validation": "data/artifacts/ltsa_v2/seed_42/b/validation_predictions.json"},
+      "prediction_sha256": {"validation": "f470a161785fd00dbabebd5a013083cabf10374b7ca5598b7e88116a4e129c73"}
+    },
+    {
+      "role": "b-continuation", "seed": 42,
+      "specification": "data/artifacts/ltsa_v2/investigations/exploratory_b_continuation_seed_42_retry1/specification.json",
+      "specification_sha256": "4dd7726a248e759641dab119fa63119ea7e95804b69dfc9bb5d0bf9d7336f41d",
+      "checkpoint": "data/artifacts/ltsa_v2/investigations/exploratory_b_continuation_seed_42_retry1/b-continuation/best.pt",
+      "checkpoint_sha256": "2abb82b687551a36a449dd6d49b6f58d229165c3773eef6f0b7e1d065c5bf36a",
+      "summary": "data/artifacts/ltsa_v2/investigations/exploratory_b_continuation_seed_42_retry1/b-continuation/summary.json",
+      "summary_sha256": "cc1a3434c4ffb568734164ddecb3f14782519c497c4ae0198db374212324d27a",
+      "predictions": {"validation": "data/artifacts/ltsa_v2/investigations/exploratory_b_continuation_seed_42_retry1/b-continuation/validation_predictions.json"},
+      "prediction_sha256": {"validation": "480de443e09afe3b5b3533196eff24d4abe0024b7533c35a3b4d77fc00f23ff8"},
+      "report": "data/artifacts/ltsa_v2/investigations/exploratory_b_continuation_seed_42_retry1/report.json"
+    },
+    {
+      "role": "history-1l", "seed": 42,
+      "checkpoint": "data/artifacts/ltsa_v2/investigations/exploratory_history_1l_seed_42/history-1l/best.pt",
+      "checkpoint_sha256": "2903d0060caadaffc0940a10fdcd7d3314af82f39aa54af416677b88c8302bbe",
+      "summary": "data/artifacts/ltsa_v2/investigations/exploratory_history_1l_seed_42/history-1l/summary.json",
+      "summary_sha256": "3d420711d44b9e1b536298d62e81c5a72b1057ed18c817ecc5183f6c13386c0e",
+      "predictions": {"validation": "data/artifacts/ltsa_v2/investigations/exploratory_history_1l_seed_42/history-1l/validation_predictions.json"},
+      "prediction_sha256": {"validation": "b930448bb79f7ee86c98116976386cf00b937b1ffa53e3fe9d0d50cce1564df0"},
+      "report": "data/artifacts/ltsa_v2/investigations/exploratory_history_1l_seed_42/report.json"
+    },
+    {
+      "role": "history-2l", "seed": 42,
+      "checkpoint": "data/artifacts/ltsa_v2/investigations/exploratory_history_2l_seed_42/history-2l/best.pt",
+      "checkpoint_sha256": "f25bf7240b1a64b5619f83f2efd4417e602d2a7a9516ae629ac5f695d376b251",
+      "summary": "data/artifacts/ltsa_v2/investigations/exploratory_history_2l_seed_42/history-2l/summary.json",
+      "summary_sha256": "6e47d72ff07b3a5a2ae0546ec002f0829092d4bff7b30c86fb74daf4ff81e4a3",
+      "predictions": {"validation": "data/artifacts/ltsa_v2/investigations/exploratory_history_2l_seed_42/history-2l/validation_predictions.json"},
+      "prediction_sha256": {"validation": "016dddfa4ad25a989cf5f957d690bc83940a8352d516ab73cdd32532baf85e15"},
+      "report": "data/artifacts/ltsa_v2/investigations/exploratory_history_2l_seed_42/report.json"
+    },
+    {
+      "role": "b", "seed": 43,
+      "checkpoint": "data/artifacts/ltsa_v2/seed_43/b/best.pt",
+      "checkpoint_sha256": "91c778d0cd8bfb9d6d628fb25d15a4503b3ca0751ab13a6aa6de372c2f0a3ebf",
+      "summary": "data/artifacts/ltsa_v2/seed_43/b/summary.json",
+      "summary_sha256": "9d4388addeee730dda0068ed1d0370bb36c476b5c13303bdf56c794a5482f482",
+      "predictions": {"validation": "data/artifacts/ltsa_v2/seed_43/b/validation_predictions.json"},
+      "prediction_sha256": {"validation": "b12241bfb153fd34340d23b04e26a4f98636726a2b62976b3010e6d93533c802"}
+    },
+    {
+      "role": "b", "seed": 44,
+      "checkpoint": "data/artifacts/ltsa_v2/seed_44/b/best.pt",
+      "checkpoint_sha256": "8344aecbbbc460ef0f3a15e4415e2b22980aae8e6ad8fb21aecec2ae0f073c27",
+      "summary": "data/artifacts/ltsa_v2/seed_44/b/summary.json",
+      "summary_sha256": "ab322f1d9d36d98950b03fd56d14f108e4f420d957e3dec1413a3d774e0ff918",
+      "predictions": {"validation": "data/artifacts/ltsa_v2/seed_44/b/validation_predictions.json"},
+      "prediction_sha256": {"validation": "3c3013c8a3ddc2f411d263bb6571391d3c483ee67bc6bebf43565ea9b3b36e22"}
+    },
+    {"role": "latest-only-1l", "seed": 42, "status": "pending"},
+    {"role": "b-continuation", "seed": 43, "status": "pending"},
+    {"role": "history-1l", "seed": 43, "status": "pending"},
+    {"role": "history-2l", "seed": 43, "status": "pending"},
+    {"role": "latest-only-1l", "seed": 43, "status": "pending"},
+    {"role": "b-continuation", "seed": 44, "status": "pending"},
+    {"role": "history-1l", "seed": 44, "status": "pending"},
+    {"role": "history-2l", "seed": 44, "status": "pending"},
+    {"role": "latest-only-1l", "seed": 44, "status": "pending"}
+  ]
+}
